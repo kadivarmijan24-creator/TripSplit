@@ -1,0 +1,11 @@
+{
+  "name":"TripSplit",
+  "short_name":"TripSplit",
+  "description":"Split trip expenses with friends.",
+  "start_url":"./index.html",
+  "display":"standalone",
+  "background_color":"#f4f6f9",
+  "theme_color":"#111827",
+  "orientation":"portrait",
+  "icons":[]
+}
