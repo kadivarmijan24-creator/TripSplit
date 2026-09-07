@@ -698,4 +698,1169 @@ async function openRecentTrip(id) {
         const snapshot = await get(ref(db, "trips/" + id));
         if (!snapshot.exists()) {
             removeRecentTrip(id);
-            to
+            toast("Trip not found.");
+            return;
+        }
+
+        const trip = normalizeTrip(snapshot.val(), id);
+        saveTripLocally(trip);
+        subscribeToTrip(id);
+        renderTrip();
+    } catch (error) {
+        console.error(error);
+        toast("Could not open this trip.");
+    }
+}
+
+async function refreshTripFromFirebase(id) {
+    try {
+        const snapshot = await get(ref(db, "trips/" + id));
+        if (!snapshot.exists()) {
+            removeRecentTrip(id);
+            if (state.currentId === id) {
+                state.currentId = null;
+                localStorage.removeItem(CURRENT_KEY);
+                show("home");
+            }
+            return;
+        }
+        const trip = normalizeTrip(snapshot.val(), id);
+        saveTripLocally(trip);
+        setSyncStatus(true);
+        renderTrip();
+    } catch (error) {
+        setSyncStatus(false);
+        console.warn("Background Firebase refresh failed:", error);
+    }
+}
+
+
+/* =========================================================
+   JOIN TRIP
+========================================================= */
+
+async function joinTrip() {
+    const code = $("joinCode").value.trim().toUpperCase();
+    const name = $("joinName").value.trim();
+
+    if (code.length !== 6) {
+        toast("Enter a valid 6-character code.");
+        return;
+    }
+    if (!name) {
+        toast("Enter your name.");
+        return;
+    }
+
+    const button = $("joinConfirmBtn");
+    button.disabled = true;
+    button.textContent = "Joining...";
+
+    try {
+        const codeSnapshot = await get(ref(db, "tripCodes/" + code));
+        if (!codeSnapshot.exists()) {
+            toast("Trip code not found.");
+            return;
+        }
+
+        const tripId = codeSnapshot.val();
+        const tripSnapshot = await get(ref(db, "trips/" + tripId));
+        if (!tripSnapshot.exists()) {
+            toast("Trip no longer exists.");
+            return;
+        }
+
+        const trip = normalizeTrip(tripSnapshot.val(), tripId);
+        const existing = trip.members.find(
+            m => m.name.trim().toLowerCase() === name.toLowerCase()
+        );
+
+        if (!existing) {
+            const memberId = uid();
+            await set(ref(db, `trips/${tripId}/members/${memberId}`), {
+                id: memberId,
+                name
+            });
+            toast("Joined trip successfully 🎉");
+        } else {
+            toast("Welcome back 👋");
+        }
+
+        $("joinCode").value = "";
+        $("joinName").value = "";
+
+        saveTripLocally(trip);
+        subscribeToTrip(tripId);
+        renderTrip();
+    } catch (error) {
+        console.error(error);
+        toast("Could not join trip.");
+    } finally {
+        button.disabled = false;
+        button.textContent = "Join Trip";
+    }
+}
+
+
+/* =========================================================
+   ADD MEMBER (OFFLINE-CAPABLE + QUEUE)
+========================================================= */
+
+function addMember() {
+    const trip = current();
+    if (!trip) return;
+
+    openModal(
+        "Add Friend",
+        "Add someone to this trip.",
+        `
+        <label>Friend Name</label>
+        <input id="newMemberName" placeholder="e.g. Ahmed" maxlength="40">
+        <button class="btn btn-primary full" id="saveMemberBtn">Add Friend</button>
+        `
+    );
+
+    $("saveMemberBtn").onclick = async () => {
+        const name = $("newMemberName").value.trim();
+        if (!name) {
+            toast("Enter friend name.");
+            return;
+        }
+
+        const duplicate = trip.members.some(
+            m => m.name.trim().toLowerCase() === name.toLowerCase()
+        );
+        if (duplicate) {
+            toast("Member already exists.");
+            return;
+        }
+
+        const memberId = uid();
+        const newMember = { id: memberId, name };
+
+        trip.members.push(newMember);
+        saveTripLocally(trip);
+        renderTrip();
+        closeModal();
+        toast("Friend added 👥");
+
+        if (!navigator.onLine) {
+            addToSyncQueue({
+                type: "addMember",
+                tripId: trip.id,
+                member: newMember
+            });
+            setSyncStatus(false);
+        } else {
+            try {
+                await set(ref(db, `trips/${trip.id}/members/${memberId}`), newMember);
+                setSyncStatus(true);
+            } catch (error) {
+                console.warn("Live add failed, added to queue:", error);
+                addToSyncQueue({
+                    type: "addMember",
+                    tripId: trip.id,
+                    member: newMember
+                });
+                setSyncStatus(false);
+            }
+        }
+    };
+}
+
+
+/* =========================================================
+   EXPENSE FORM (OFFLINE-FIRST + SYNC QUEUE SAFEGUARD)
+========================================================= */
+
+function expenseForm(exp = null) {
+    const trip = current();
+    if (!trip) return;
+
+    const isEdit = !!exp;
+    const paidBy = exp?.paidBy || trip.members[0]?.id || "";
+    let splitMode = exp?.splitMode || "equal";
+    let selectedCategory = exp?.category || "food";
+
+    const categories = [
+        { id: "food", label: "🍔 Food" },
+        { id: "hotel", label: "🏨 Stay" },
+        { id: "travel", label: "🚕 Travel" },
+        { id: "fuel", label: "⛽ Fuel" },
+        { id: "shopping", label: "🛍️ Shopping" },
+        { id: "fun", label: "🎬 Fun" },
+        { id: "medical", label: "💊 Medical" },
+        { id: "other", label: "💸 Other" }
+    ];
+
+    openModal(
+        isEdit ? "Edit Expense" : "Add Expense",
+        isEdit ? "Update this expense." : "Record a payment.",
+        `
+        <label>Expense Category</label>
+        <div class="category-grid" id="categoryPicker">
+            ${categories.map(cat => `
+                <button type="button" class="category-btn ${cat.id === selectedCategory ? "active" : ""}" data-cat="${cat.id}">
+                    ${cat.label}
+                </button>
+            `).join("")}
+        </div>
+
+        <label>Expense Name</label>
+        <input id="expenseName" placeholder="e.g. Dinner, Hotel, Taxi" maxlength="60" value="${esc(exp?.name || "")}">
+
+        <label>Amount</label>
+        <input id="expenseAmount" type="number" min="0" step="0.01" placeholder="₹ 0" value="${exp?.amount ?? ""}">
+
+        <label>Paid By</label>
+        <select id="expensePaidBy">
+            ${trip.members.map(member => `
+                <option value="${esc(member.id)}" ${member.id === paidBy ? "selected" : ""}>
+                    ${esc(member.name)}
+                </option>
+            `).join("")}
+        </select>
+
+        <label>Split Type</label>
+        <div class="choice-row">
+            <button type="button" class="choice ${splitMode === "equal" ? "selected" : ""}" data-split="equal">
+                Equal Split
+            </button>
+            <button type="button" class="choice ${splitMode === "custom" ? "selected" : ""}" data-split="custom">
+                Custom Split
+            </button>
+        </div>
+
+        <label>Split Between</label>
+        <div class="check-list">
+            ${trip.members.map(member => {
+                const checked = exp
+                    ? (Array.isArray(exp.splitBetween) ? exp.splitBetween.includes(member.id) : true)
+                    : true;
+                return `
+                    <div class="check-item">
+                        <input type="checkbox" class="split-member" value="${esc(member.id)}" id="split_${esc(member.id)}" ${checked ? "checked" : ""}>
+                        <label for="split_${esc(member.id)}">${esc(member.name)}</label>
+                    </div>
+                `;
+            }).join("")}
+        </div>
+
+        <div id="customSplitArea"></div>
+
+        <button class="btn btn-primary full" id="saveExpenseBtn">
+            ${isEdit ? "Save Changes" : "Add Expense"}
+        </button>
+        `
+    );
+
+    document.querySelectorAll("#categoryPicker .category-btn").forEach(btn => {
+        btn.onclick = () => {
+            selectedCategory = btn.dataset.cat;
+            document.querySelectorAll("#categoryPicker .category-btn").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+
+            const nameInput = $("expenseName");
+            if (!nameInput.value.trim()) {
+                const labelText = btn.textContent.trim().split(" ").slice(1).join(" ");
+                nameInput.value = labelText;
+            }
+        };
+    });
+
+    function updateCustomTotal() {
+        let total = 0;
+        document.querySelectorAll(".custom-input").forEach(input => {
+            total += Number(input.value || 0);
+        });
+        if ($("customTotal")) {
+            $("customTotal").textContent = money(total);
+        }
+    }
+
+    function renderCustomArea() {
+        const area = $("customSplitArea");
+        if (!area) return;
+
+        if (splitMode !== "custom") {
+            area.innerHTML = "";
+            return;
+        }
+
+        const selectedIds = [...document.querySelectorAll(".split-member:checked")].map(i => i.value);
+
+        area.innerHTML = `
+            <label>Custom Amounts</label>
+            <div class="check-list">
+                ${trip.members.filter(m => selectedIds.includes(m.id)).map(member => {
+                    const oldValue = exp?.customSplits?.[member.id] ?? "";
+                    return `
+                        <div class="custom-row">
+                            <span>${esc(member.name)}</span>
+                            <input type="number" class="custom-input" data-member="${esc(member.id)}" min="0" step="0.01" placeholder="₹0" value="${oldValue}">
+                        </div>
+                    `;
+                }).join("")}
+            </div>
+            <div class="split-total">
+                <span>Custom Total</span>
+                <strong id="customTotal">₹0</strong>
+            </div>
+        `;
+        updateCustomTotal();
+    }
+
+    document.querySelectorAll("[data-split]").forEach(button => {
+        button.onclick = () => {
+            splitMode = button.dataset.split;
+            document.querySelectorAll("[data-split]").forEach(btn => {
+                btn.classList.toggle("selected", btn.dataset.split === splitMode);
+            });
+            renderCustomArea();
+        };
+    });
+
+    document.querySelectorAll(".split-member").forEach(input => {
+        input.onchange = () => {
+            if (splitMode === "custom") renderCustomArea();
+        };
+    });
+
+    $("modalBody").addEventListener("input", event => {
+        if (event.target.classList.contains("custom-input")) {
+            updateCustomTotal();
+        }
+    });
+
+    renderCustomArea();
+
+    $("saveExpenseBtn").onclick = async () => {
+        const name = $("expenseName").value.trim();
+        const amount = Number($("expenseAmount").value);
+        const paidBy = $("expensePaidBy").value;
+        const splitBetween = [...document.querySelectorAll(".split-member:checked")].map(i => i.value);
+
+        if (!name) {
+            toast("Enter expense name.");
+            return;
+        }
+        if (!Number.isFinite(amount) || amount <= 0) {
+            toast("Enter a valid amount.");
+            return;
+        }
+        if (!paidBy) {
+            toast("Select who paid.");
+            return;
+        }
+        if (!splitBetween.length) {
+            toast("Select at least one member.");
+            return;
+        }
+
+        let customSplits = {};
+        if (splitMode === "custom") {
+            let total = 0;
+            for (const memberId of splitBetween) {
+                const input = document.querySelector(`.custom-input[data-member="${memberId}"]`);
+                const val = Number(input?.value || 0);
+                if (!Number.isFinite(val) || val < 0) {
+                    toast("Enter valid custom amounts.");
+                    return;
+                }
+                customSplits[memberId] = val;
+                total += val;
+            }
+
+            if (Math.abs(total - amount) > 0.01) {
+                toast(`Custom split must equal ${money(amount)}`);
+                return;
+            }
+        }
+
+        const expenseId = exp?.id || uid();
+        const expense = {
+            id: expenseId,
+            name,
+            category: selectedCategory,
+            amount,
+            paidBy,
+            splitBetween,
+            splitMode,
+            customSplits,
+            createdAt: exp?.createdAt || new Date().toISOString()
+        };
+
+        const expIndex = trip.expenses.findIndex(e => e.id === expenseId);
+        if (expIndex >= 0) {
+            trip.expenses[expIndex] = expense;
+        } else {
+            trip.expenses.push(expense);
+        }
+
+        saveTripLocally(trip);
+        renderTrip();
+        closeModal();
+        toast(isEdit ? "Expense updated 💾" : "Expense added 💸");
+
+        if (!navigator.onLine) {
+            addToSyncQueue({
+                type: "setExpense",
+                tripId: trip.id,
+                expense: expense
+            });
+            setSyncStatus(false);
+            toast("Saved offline. Will sync when online 📱");
+        } else {
+            try {
+                await set(ref(db, `trips/${trip.id}/expenses/${expenseId}`), expense);
+                setSyncStatus(true);
+            } catch (error) {
+                console.warn("Live save failed, saved to sync queue:", error);
+                addToSyncQueue({
+                    type: "setExpense",
+                    tripId: trip.id,
+                    expense: expense
+                });
+                setSyncStatus(false);
+            }
+        }
+    };
+}
+
+async function deleteExpense(id) {
+    const trip = current();
+    if (!trip) return;
+
+    const expense = trip.expenses.find(e => e.id === id);
+    if (!expense) return;
+
+    if (!confirm(`Delete "${expense.name}"?`)) return;
+
+    trip.expenses = trip.expenses.filter(e => e.id !== id);
+    saveTripLocally(trip);
+    renderTrip();
+    toast("Expense deleted.");
+
+    if (!navigator.onLine) {
+        addToSyncQueue({
+            type: "deleteExpense",
+            tripId: trip.id,
+            expenseId: id
+        });
+        setSyncStatus(false);
+    } else {
+        try {
+            await set(ref(db, `trips/${trip.id}/expenses/${id}`), null);
+            setSyncStatus(true);
+        } catch (error) {
+            console.warn("Live delete failed, queued for sync:", error);
+            addToSyncQueue({
+                type: "deleteExpense",
+                tripId: trip.id,
+                expenseId: id
+            });
+            setSyncStatus(false);
+        }
+    }
+}
+
+
+/* =========================================================
+   SPLIT CALCULATIONS & BALANCES
+========================================================= */
+
+function shares(exp) {
+    const result = {};
+    if (exp.splitMode === "custom") {
+        for (const memberId of exp.splitBetween || []) {
+            result[memberId] = Number(exp.customSplits?.[memberId] || 0);
+        }
+        return result;
+    }
+
+    const ids = exp.splitBetween || [];
+    const each = ids.length ? Number(exp.amount) / ids.length : 0;
+    ids.forEach(id => {
+        result[id] = each;
+    });
+    return result;
+}
+
+function balances() {
+    const trip = current();
+    if (!trip) return {};
+
+    const result = {};
+    trip.members.forEach(m => {
+        result[m.id] = 0;
+    });
+
+    trip.expenses.forEach(exp => {
+        const amt = Number(exp.amount || 0);
+        if (result[exp.paidBy] !== undefined) {
+            result[exp.paidBy] += amt;
+        }
+
+        const split = shares(exp);
+        Object.entries(split).forEach(([memberId, share]) => {
+            if (result[memberId] !== undefined) {
+                result[memberId] -= Number(share || 0);
+            }
+        });
+    });
+
+    return result;
+}
+
+function settlements() {
+    const balance = balances();
+    const debtors = [];
+    const creditors = [];
+
+    Object.entries(balance).forEach(([memberId, amt]) => {
+        if (amt < -0.01) debtors.push({ id: memberId, amount: -amt });
+        else if (amt > 0.01) creditors.push({ id: memberId, amount: amt });
+    });
+
+    const result = [];
+    let d = 0;
+    let c = 0;
+
+    while (d < debtors.length && c < creditors.length) {
+        const debtor = debtors[d];
+        const creditor = creditors[c];
+        const amt = Math.min(debtor.amount, creditor.amount);
+
+        result.push({
+            from: debtor.id,
+            to: creditor.id,
+            amount: amt
+        });
+
+        debtor.amount -= amt;
+        creditor.amount -= amt;
+
+        if (debtor.amount <= 0.01) d++;
+        if (creditor.amount <= 0.01) c++;
+    }
+
+    return result;
+}
+
+function memberName(id) {
+    const trip = current();
+    const member = trip?.members.find(m => m.id === id);
+    return member?.name || "Unknown";
+}
+
+function empty(title, text) {
+    return `
+        <div class="empty">
+            <strong>${esc(title)}</strong>
+            ${esc(text)}
+        </div>
+    `;
+}
+
+function expenseHTML(exp) {
+    const visual = expenseVisual(exp.name, exp.category);
+    return `
+        <div class="expense-main-row">
+            <div class="expense-image ${visual.type}">
+                <span>${visual.emoji}</span>
+            </div>
+            <div class="expense-info">
+                <b>${esc(exp.name)}</b>
+                <div class="expense-meta">
+                    <small>Paid by ${esc(memberName(exp.paidBy))}</small>
+                    <span class="dot">•</span>
+                    <small>${formatDate(exp.createdAt)}</small>
+                </div>
+            </div>
+            <div class="expense-amount">${money(exp.amount)}</div>
+        </div>
+    `;
+}
+
+
+/* =========================================================
+   UI RENDERING (EXPENSES, MEMBERS, BALANCES)
+========================================================= */
+
+function renderRecentExpenses() {
+    const trip = current();
+    const container = $("recentExpensesList");
+    if (!trip || !container) return;
+
+    const expenses = [...trip.expenses]
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .slice(0, 3);
+
+    if (!expenses.length) {
+        container.innerHTML = empty("No expenses yet", "Add your first trip expense.");
+        return;
+    }
+
+    container.innerHTML = expenses.map(exp => `
+        <div class="card expense-card-wrapper">
+            ${expenseHTML(exp)}
+        </div>
+    `).join("");
+}
+
+function renderMembers() {
+    const trip = current();
+    const container = $("membersList");
+    if (!trip || !container) return;
+
+    if (!trip.members.length) {
+        container.innerHTML = empty("No members", "Add friends to this trip.");
+        return;
+    }
+
+    container.innerHTML = trip.members.map((member, index) => `
+        <div class="card member-card">
+            <div class="avatar">${esc(member.name.charAt(0).toUpperCase())}</div>
+            <div>
+                <b>${esc(member.name)}</b>
+                <small>${index === 0 ? "Trip creator" : "Member"}</small>
+            </div>
+        </div>
+    `).join("");
+}
+
+function renderExpenses() {
+    const trip = current();
+    const container = $("expensesList");
+    if (!trip || !container) return;
+
+    let expenses = [...trip.expenses].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    if (state.categoryFilter !== "all") {
+        expenses = expenses.filter(exp => expenseVisual(exp.name, exp.category).type === state.categoryFilter);
+    }
+
+    if (!expenses.length) {
+        container.innerHTML = empty(
+            state.categoryFilter === "all" ? "No expenses yet" : "No matches",
+            "Add an expense to start splitting."
+        );
+        return;
+    }
+
+    container.innerHTML = expenses.map(exp => `
+        <div class="card">
+            ${expenseHTML(exp)}
+            <div class="card-actions">
+                <button class="mini-btn" data-edit-expense="${esc(exp.id)}">Edit</button>
+                <button class="mini-btn" data-delete-expense="${esc(exp.id)}">Delete</button>
+            </div>
+        </div>
+    `).join("");
+}
+
+function renderBalances() {
+    const trip = current();
+    const container = $("balancesList");
+    if (!trip || !container) return;
+
+    const balance = balances();
+
+    container.innerHTML = trip.members.map(member => {
+        const val = balance[member.id] || 0;
+        let status = "Settled";
+        if (val > 0.01) status = "gets back";
+        else if (val < -0.01) status = "owes";
+
+        const className = val > 0.01 ? "positive" : val < -0.01 ? "negative" : "";
+
+        return `
+            <div class="card balance-card">
+                <div>
+                    <b>${esc(member.name)}</b>
+                    <small>${status}</small>
+                </div>
+                <strong class="${className}">
+                    ${val > 0.01 ? "+" : ""}${money(val)}
+                </strong>
+            </div>
+        `;
+    }).join("");
+}
+
+function renderSettlement() {
+    const container = $("settlementList");
+    if (!container) return;
+
+    const list = settlements();
+    if (!list.length) {
+        container.innerHTML = empty("All settled 🎉", "Nobody owes anything.");
+        return;
+    }
+
+    container.innerHTML = list.map(item => `
+        <div class="settlement-card">
+            <div class="who">
+                <b>${esc(memberName(item.from))}</b>
+                <small>needs to pay</small>
+            </div>
+            <div class="settle-arrow">→</div>
+            <div class="who">
+                <b>${esc(memberName(item.to))}</b>
+            </div>
+            <div class="settle-money">${money(item.amount)}</div>
+        </div>
+    `).join("");
+}
+
+function renderTrip() {
+    const trip = current();
+    if (!trip) {
+        show("home");
+        return;
+    }
+
+    $("tripTitle").textContent = trip.name;
+    $("tripCode").textContent = trip.code;
+    $("tripMemberCount").textContent = `${trip.members.length} ${trip.members.length === 1 ? "member" : "members"}`;
+    $("totalMembers").textContent = trip.members.length;
+
+    const total = trip.expenses.reduce((sum, exp) => sum + Number(exp.amount || 0), 0);
+    $("totalExpense").textContent = money(total);
+
+    renderRecentExpenses();
+    renderMembers();
+    renderExpenses();
+    renderBalances();
+    renderSettlement();
+
+    addRecentTrip(trip);
+
+    const tripView = $("tripView");
+    if (tripView && !tripView.classList.contains("active")) {
+        show("trip");
+    }
+}
+
+
+/* =========================================================
+   BILL ROULETTE CONTROLLER (10-SECOND ULTRA DURATION)
+========================================================= */
+
+let currentWheelRotation = 0;
+let isSpinning = false;
+
+function openRouletteModal() {
+    const trip = current();
+    if (!trip) return;
+
+    if (!trip.members || trip.members.length < 2) {
+        toast("Add at least 2 members to spin!");
+        return;
+    }
+
+    openModal(
+        "🎯 Bill Roulette",
+        "10-second fate decide karega agla bill kaun dega!",
+        `
+        <div class="roulette-container">
+            <div class="wheel-wrapper">
+                <div class="wheel-pointer"></div>
+                <canvas id="wheelCanvas" width="560" height="560"></canvas>
+            </div>
+            
+            <div class="roulette-result" id="rouletteResult">
+                <span>Tap spin to pick a payer</span>
+            </div>
+
+            <div style="display: flex; gap: 10px; width: 100%;">
+                <button class="btn btn-primary full" id="spinActionBtn" style="margin-top: 0; flex: 1;">
+                    🎲 Spin the Wheel
+                </button>
+                <button class="btn btn-secondary full hidden" id="rouletteAddExpenseBtn" style="margin-top: 0; flex: 1;">
+                    💸 Add Bill for Winner
+                </button>
+            </div>
+        </div>
+        `
+    );
+
+    drawRouletteWheel(trip.members);
+
+    let selectedWinner = null;
+
+    $("spinActionBtn").onclick = () => {
+        if (isSpinning) return;
+        isSpinning = true;
+        getAudioContext();
+
+        const members = trip.members;
+        const totalSegments = members.length;
+        const arc = (2 * Math.PI) / totalSegments;
+
+        // Extra rotations for 10 seconds (14 to 20 full rotations)
+        const randomSpins = Math.floor(Math.random() * 7) + 14;
+        const randomExtraAngle = Math.random() * (2 * Math.PI);
+        const totalAngle = (randomSpins * 2 * Math.PI) + randomExtraAngle;
+
+        currentWheelRotation += totalAngle;
+
+        const canvas = $("wheelCanvas");
+        if (canvas) {
+            canvas.style.transform = `rotate(${currentWheelRotation}rad)`;
+        }
+
+        // Ticking audio loop spread across 10 seconds
+        let tickInterval = 45;
+        let tickTimer;
+        const startSound = Date.now();
+
+        function triggerTicks() {
+            const elapsed = Date.now() - startSound;
+            if (elapsed < 9800) {
+                playTickSound();
+                // Exponential slow-down curve over 10,000ms
+                tickInterval = 45 + Math.pow(elapsed / 9800, 3) * 600;
+                tickTimer = setTimeout(triggerTicks, tickInterval);
+            }
+        }
+        triggerTicks();
+
+        $("spinActionBtn").disabled = true;
+        $("spinActionBtn").textContent = "Spinning (10s)...";
+        $("rouletteResult").innerHTML = "<span>Wheel is spinning... 🎲</span>";
+
+        const addExpBtn = $("rouletteAddExpenseBtn");
+        if (addExpBtn) addExpBtn.classList.add("hidden");
+
+        setTimeout(() => {
+            clearTimeout(tickTimer);
+            isSpinning = false;
+            $("spinActionBtn").disabled = false;
+            $("spinActionBtn").textContent = "Spin Again 🎲";
+
+            playWinnerSound();
+
+            const normalizedAngle = (currentWheelRotation) % (2 * Math.PI);
+            let winningAngle = (1.5 * Math.PI - normalizedAngle) % (2 * Math.PI);
+            if (winningAngle < 0) winningAngle += 2 * Math.PI;
+
+            const winningIndex = Math.floor(winningAngle / arc);
+            selectedWinner = members[winningIndex];
+
+            $("rouletteResult").innerHTML = `
+                <span>🎉 Today's Sponsor is</span>
+                <b>${esc(selectedWinner.name)}!</b>
+            `;
+
+            if (addExpBtn) {
+                addExpBtn.classList.remove("hidden");
+                addExpBtn.onclick = () => {
+                    closeModal();
+                    expenseForm({ paidBy: selectedWinner.id });
+                };
+            }
+        }, 10000);
+    };
+}
+
+function drawRouletteWheel(members) {
+    const canvas = $("wheelCanvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const num = members.length;
+    const arc = (2 * Math.PI) / num;
+    const cx = 280;
+    const cy = 280;
+    const radius = 260;
+
+    const colors = [
+        "#D2042D", "#23966B", "#E67E22", "#8E44AD",
+        "#2980B9", "#D35400", "#16A085", "#C0392B"
+    ];
+
+    ctx.clearRect(0, 0, 560, 560);
+
+    members.forEach((m, i) => {
+        const angle = i * arc;
+        ctx.beginPath();
+        ctx.fillStyle = colors[i % colors.length];
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, radius, angle, angle + arc);
+        ctx.lineTo(cx, cy);
+        ctx.fill();
+
+        ctx.strokeStyle = "rgba(255,255,255,0.25)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(angle + arc / 2);
+        ctx.textAlign = "right";
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 26px sans-serif";
+        ctx.fillText(m.name, radius - 30, 10);
+        ctx.restore();
+    });
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, 38, 0, 2 * Math.PI);
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    ctx.shadowColor = "rgba(0,0,0,0.3)";
+    ctx.shadowBlur = 10;
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, 26, 0, 2 * Math.PI);
+    ctx.fillStyle = "#D2042D";
+    ctx.fill();
+    ctx.shadowBlur = 0;
+}
+
+
+/* =========================================================
+   WHATSAPP & SUMMARY SHARING
+========================================================= */
+
+async function shareWhatsAppSummary() {
+    const trip = current();
+    if (!trip) return;
+
+    const list = settlements();
+    const total = trip.expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+
+    let text = `🌴 *${trip.name}* (TripSplit Summary)\n`;
+    text += `💰 Total Expenses: ${money(total)}\n`;
+    text += `👥 Members: ${trip.members.map(m => m.name).join(", ")}\n\n`;
+
+    text += `⚖️ *Final Settlements:*\n`;
+    if (!list.length) {
+        text += `All settled up! Nobody owes anything 🎉\n\n`;
+    } else {
+        list.forEach(item => {
+            text += `• ${memberName(item.from)} ➔ pays ${memberName(item.to)}: ${money(item.amount)}\n`;
+        });
+        text += `\n`;
+    }
+    text += `Join this trip using code: *${trip.code}*`;
+
+    const encoded = encodeURIComponent(text);
+    const whatsappUrl = `https://api.whatsapp.com/send?text=${encoded}`;
+
+    if (navigator.share) {
+        try {
+            await navigator.share({
+                title: `${trip.name} - Settlement Summary`,
+                text: text
+            });
+            return;
+        } catch (_) {}
+    }
+
+    window.open(whatsappUrl, "_blank");
+}
+
+async function shareTrip() {
+    const trip = current();
+    if (!trip) return;
+
+    const text = `Join my TripSplit trip "${trip.name}" using code: ${trip.code}`;
+    try {
+        if (navigator.share) {
+            await navigator.share({ title: "TripSplit", text });
+            return;
+        }
+    } catch (error) {
+        if (error?.name === "AbortError") return;
+    }
+
+    try {
+        await navigator.clipboard.writeText(trip.code);
+        toast("Trip code copied 📋");
+    } catch (_) {
+        toast(`Trip Code: ${trip.code}`);
+    }
+}
+
+async function copyCode() {
+    const trip = current();
+    if (!trip) return;
+
+    try {
+        await navigator.clipboard.writeText(trip.code);
+        toast("Trip code copied 📋");
+    } catch (_) {
+        toast(`Trip Code: ${trip.code}`);
+    }
+}
+
+
+/* =========================================================
+   EVENT LISTENERS
+========================================================= */
+
+$("themeToggleBtn")?.addEventListener("click", toggleTheme);
+
+$("createTripBtn")?.addEventListener("click", () => show("create"));
+$("joinTripBtn")?.addEventListener("click", () => show("join"));
+$("createConfirmBtn")?.addEventListener("click", createTrip);
+$("joinConfirmBtn")?.addEventListener("click", joinTrip);
+
+$("backBtn")?.addEventListener("click", () => show("home"));
+$("homeBtn")?.addEventListener("click", () => show("home"));
+
+$("closeModal")?.addEventListener("click", closeModal);
+$("modal")?.addEventListener("click", e => {
+    if (e.target === $("modal")) closeModal();
+});
+
+$("copyCodeBtn")?.addEventListener("click", copyCode);
+$("shareBtn")?.addEventListener("click", shareTrip);
+$("whatsappShareBtn")?.addEventListener("click", shareWhatsAppSummary);
+
+$("addMemberBtn")?.addEventListener("click", addMember);
+$("overviewAddMember")?.addEventListener("click", addMember);
+
+$("addExpenseBtn")?.addEventListener("click", () => expenseForm());
+$("overviewAddExpense")?.addEventListener("click", () => expenseForm());
+
+$("spinWheelBtn")?.addEventListener("click", openRouletteModal);
+
+// Online / Offline window events for sync status & queue flushing
+window.addEventListener("online", async () => {
+    setSyncStatus(true);
+    toast("Back online 🌐");
+    await processSyncQueue();
+
+    const id = state.currentId;
+    if (id) refreshTripFromFirebase(id);
+});
+
+window.addEventListener("offline", () => {
+    setSyncStatus(false);
+    toast("Working offline 📱");
+});
+
+// Recent trip open vs remove
+$("recentTripsList")?.addEventListener("click", event => {
+    const delBtn = event.target.closest("[data-delete-recent]");
+    if (delBtn) {
+        event.stopPropagation();
+        const tripId = delBtn.dataset.deleteRecent;
+        removeRecentTrip(tripId);
+        toast("Trip removed from screen.");
+        return;
+    }
+
+    const card = event.target.closest("[data-recent-trip]");
+    if (card) {
+        openRecentTrip(card.dataset.recentTrip);
+    }
+});
+
+// Clear all recent trips
+$("clearRecentBtn")?.addEventListener("click", () => {
+    if (!confirm("Clear recent trips from this device?")) return;
+    saveRecentTrips([]);
+    renderRecentTrips();
+    toast("Recent trips cleared.");
+});
+
+// Category filter chip listener
+$("categoryFilterBar")?.addEventListener("click", event => {
+    const chip = event.target.closest(".filter-chip");
+    if (!chip) return;
+
+    document.querySelectorAll(".filter-chip").forEach(c => c.classList.remove("active"));
+    chip.classList.add("active");
+    state.categoryFilter = chip.dataset.filter || "all";
+    renderExpenses();
+});
+
+// Bottom navigation tabs
+document.querySelectorAll(".nav-item").forEach(button => {
+    button.addEventListener("click", () => openTab(button.dataset.tab));
+});
+
+// View All shortcuts
+document.querySelectorAll("[data-tab]").forEach(button => {
+    if (button.classList.contains("nav-item")) return;
+    button.addEventListener("click", () => {
+        const tab = button.dataset.tab;
+        if (tab && current()) openTab(tab);
+    });
+});
+
+// Inline expense actions
+document.addEventListener("click", event => {
+    const editBtn = event.target.closest("[data-edit-expense]");
+    if (editBtn) {
+        const trip = current();
+        const exp = trip?.expenses.find(e => e.id === editBtn.dataset.editExpense);
+        if (exp) expenseForm(exp);
+        return;
+    }
+
+    const delBtn = event.target.closest("[data-delete-expense]");
+    if (delBtn) {
+        deleteExpense(delBtn.dataset.deleteExpense);
+    }
+});
+
+$("joinCode")?.addEventListener("input", event => {
+    event.target.value = event.target.value
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "")
+        .slice(0, 6);
+});
+
+
+/* =========================================================
+   PAGE PERSISTENCE & INITIALIZATION
+========================================================= */
+
+window.addEventListener("pagehide", () => {
+    const trip = current();
+    if (trip) {
+        cacheTrip(trip);
+        addRecentTrip(trip);
+    }
+});
+
+(async function init() {
+    const savedTheme = localStorage.getItem(THEME_KEY) || "light";
+    applyTheme(savedTheme);
+
+    renderRecentTrips();
+    show("home");
+
+    const currentId = state.currentId;
+    if (currentId) {
+        const cached = getCachedTrip(currentId);
+        if (cached) {
+            state.trips[currentId] = cached;
+        }
+    }
+
+    setSyncStatus(navigator.onLine);
+
+    if (navigator.onLine) {
+        processSyncQueue();
+    }
+
+    const dismissSplash = () => {
+        setTimeout(() => {
+            const splash = $("splashScreen");
+            if (splash) {
+                splash.classList.add("hide");
+            }
+        }, 1800);
+    };
+
+    if (document.readyState === "complete") {
+        dismissSplash();
+    } else {
+        window.addEventListener("load", dismissSplash);
+    }
+})();
