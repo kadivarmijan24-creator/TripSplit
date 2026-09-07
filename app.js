@@ -1,6 +1,7 @@
 /* =========================================================
    TripSplit
    Firebase + Persistent Trips + Recent Trips + Realtime Sync
+   Offline-First Optimistic Updates + Dark Theme Sync
 ========================================================= */
 
 import {
@@ -42,6 +43,7 @@ const db = getDatabase(firebaseApp);
 const CURRENT_KEY = "tripsplit_current_v5";
 const CACHE_KEY = "tripsplit_cache_v5";
 const RECENT_KEY = "tripsplit_recent_v5";
+const THEME_KEY = "tripsplit_theme_v1";
 
 const state = {
     currentId: localStorage.getItem(CURRENT_KEY) || null,
@@ -49,6 +51,22 @@ const state = {
     unsubscribe: null,
     categoryFilter: "all"
 };
+
+
+/* =========================================================
+   THEME CONTROLLER (LIGHT / DARK)
+========================================================= */
+
+function applyTheme(theme) {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem(THEME_KEY, theme);
+}
+
+function toggleTheme() {
+    const current = document.documentElement.getAttribute("data-theme") || "light";
+    const nextTheme = current === "dark" ? "light" : "dark";
+    applyTheme(nextTheme);
+}
 
 
 /* =========================================================
@@ -672,7 +690,7 @@ async function joinTrip() {
 
 
 /* =========================================================
-   ADD MEMBER
+   ADD MEMBER (OFFLINE-CAPABLE)
 ========================================================= */
 
 function addMember() {
@@ -705,23 +723,28 @@ function addMember() {
         }
 
         const memberId = uid();
+        const newMember = { id: memberId, name };
+
+        // Local update
+        trip.members.push(newMember);
+        saveTripLocally(trip);
+        renderTrip();
+        closeModal();
+        toast("Friend added 👥");
+
+        // Background Firebase write
         try {
-            await set(ref(db, `trips/${trip.id}/members/${memberId}`), {
-                id: memberId,
-                name
-            });
-            closeModal();
-            toast("Friend added 👥");
+            await set(ref(db, `trips/${trip.id}/members/${memberId}`), newMember);
         } catch (error) {
-            console.error(error);
-            toast("Could not add member.");
+            console.warn("Member saved locally, background sync pending:", error);
+            setSyncStatus(false);
         }
     };
 }
 
 
 /* =========================================================
-   EXPENSE FORM (WITH CATEGORY SELECTION BUTTONS)
+   EXPENSE FORM (OFFLINE-FIRST OPTIMISTIC UPDATE)
 ========================================================= */
 
 function expenseForm(exp = null) {
@@ -812,7 +835,6 @@ function expenseForm(exp = null) {
             document.querySelectorAll("#categoryPicker .category-btn").forEach(b => b.classList.remove("active"));
             btn.classList.add("active");
 
-            // Auto-fill suggestion if name is empty
             const nameInput = $("expenseName");
             if (!nameInput.value.trim()) {
                 const labelText = btn.textContent.trim().split(" ").slice(1).join(" ");
@@ -943,13 +965,26 @@ function expenseForm(exp = null) {
             createdAt: exp?.createdAt || new Date().toISOString()
         };
 
+        // 1. INSTANT LOCAL UPDATE (Offline support)
+        const expIndex = trip.expenses.findIndex(e => e.id === expenseId);
+        if (expIndex >= 0) {
+            trip.expenses[expIndex] = expense;
+        } else {
+            trip.expenses.push(expense);
+        }
+
+        saveTripLocally(trip);
+        renderTrip();
+        closeModal();
+        toast(isEdit ? "Expense updated 💾" : "Expense added 💸");
+
+        // 2. BACKGROUND FIREBASE SYNC
         try {
             await set(ref(db, `trips/${trip.id}/expenses/${expenseId}`), expense);
-            closeModal();
-            toast(isEdit ? "Expense updated 💾" : "Expense added 💸");
+            setSyncStatus(true);
         } catch (error) {
-            console.error(error);
-            toast("Could not save expense.");
+            console.warn("Saved locally, pending network sync:", error);
+            setSyncStatus(false);
         }
     };
 }
@@ -963,12 +998,19 @@ async function deleteExpense(id) {
 
     if (!confirm(`Delete "${expense.name}"?`)) return;
 
+    // Instant local delete
+    trip.expenses = trip.expenses.filter(e => e.id !== id);
+    saveTripLocally(trip);
+    renderTrip();
+    toast("Expense deleted.");
+
+    // Background Firebase removal
     try {
         await set(ref(db, `trips/${trip.id}/expenses/${id}`), null);
-        toast("Expense deleted.");
+        setSyncStatus(true);
     } catch (error) {
-        console.error(error);
-        toast("Could not delete expense.");
+        console.warn("Deleted locally, pending network sync:", error);
+        setSyncStatus(false);
     }
 }
 
@@ -1144,7 +1186,6 @@ function renderExpenses() {
 
     let expenses = [...trip.expenses].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-    // Filter by category
     if (state.categoryFilter !== "all") {
         expenses = expenses.filter(exp => expenseVisual(exp.name, exp.category).type === state.categoryFilter);
     }
@@ -1333,6 +1374,8 @@ async function copyCode() {
    EVENT LISTENERS
 ========================================================= */
 
+$("themeToggleBtn")?.addEventListener("click", toggleTheme);
+
 $("createTripBtn")?.addEventListener("click", () => show("create"));
 $("joinTripBtn")?.addEventListener("click", () => show("join"));
 $("createConfirmBtn")?.addEventListener("click", createTrip);
@@ -1355,6 +1398,19 @@ $("overviewAddMember")?.addEventListener("click", addMember);
 
 $("addExpenseBtn")?.addEventListener("click", () => expenseForm());
 $("overviewAddExpense")?.addEventListener("click", () => expenseForm());
+
+// Online / Offline window events for sync status
+window.addEventListener("online", () => {
+    setSyncStatus(true);
+    toast("Back online 🌐");
+    const id = state.currentId;
+    if (id) refreshTripFromFirebase(id);
+});
+
+window.addEventListener("offline", () => {
+    setSyncStatus(false);
+    toast("Working offline 📱");
+});
 
 // Recent trip open vs remove
 $("recentTripsList")?.addEventListener("click", event => {
@@ -1443,6 +1499,10 @@ window.addEventListener("pagehide", () => {
 });
 
 (async function init() {
+    // Restore Saved Theme
+    const savedTheme = localStorage.getItem(THEME_KEY) || "light";
+    applyTheme(savedTheme);
+
     renderRecentTrips();
     show("home");
 
@@ -1454,7 +1514,8 @@ window.addEventListener("pagehide", () => {
         }
     }
 
-    // Phone aur Laptop dono me exactly identical duration (1.8s)
+    setSyncStatus(navigator.onLine);
+
     const dismissSplash = () => {
         setTimeout(() => {
             const splash = $("splashScreen");
