@@ -159,7 +159,7 @@ function playWinnerSound() {
     try {
         const ctx = getAudioContext();
         const now = ctx.currentTime;
-        const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6 Celebration
+        const notes = [523.25, 659.25, 783.99, 1046.50];
 
         notes.forEach((freq, idx) => {
             const osc = ctx.createOscillator();
@@ -1498,7 +1498,6 @@ function openRouletteModal() {
         const totalSegments = members.length;
         const arc = (2 * Math.PI) / totalSegments;
 
-        // Extra rotations for 10 seconds (14 to 20 full rotations)
         const randomSpins = Math.floor(Math.random() * 7) + 14;
         const randomExtraAngle = Math.random() * (2 * Math.PI);
         const totalAngle = (randomSpins * 2 * Math.PI) + randomExtraAngle;
@@ -1510,7 +1509,6 @@ function openRouletteModal() {
             canvas.style.transform = `rotate(${currentWheelRotation}rad)`;
         }
 
-        // Ticking audio loop spread across 10 seconds
         let tickInterval = 45;
         let tickTimer;
         const startSound = Date.now();
@@ -1519,7 +1517,6 @@ function openRouletteModal() {
             const elapsed = Date.now() - startSound;
             if (elapsed < 9800) {
                 playTickSound();
-                // Exponential slow-down curve over 10,000ms
                 tickInterval = 45 + Math.pow(elapsed / 9800, 3) * 600;
                 tickTimer = setTimeout(triggerTicks, tickInterval);
             }
