@@ -3,6 +3,7 @@
    Firebase + Persistent Trips + Recent Trips + Realtime Sync
    Offline-First Optimistic Updates + Offline Sync Queue
    Dark Theme Controller + 10s Audio Roulette
+   Theater Curtain Reveal Entry Sequence
 ========================================================= */
 
 import {
@@ -1846,18 +1847,28 @@ window.addEventListener("pagehide", () => {
         processSyncQueue();
     }
 
-    const dismissSplash = () => {
+    const startTheaterCurtainEntry = () => {
         setTimeout(() => {
             const splash = $("splashScreen");
+            const curtain = $("curtainWrapper");
+
+            // 1. Hide splash first
             if (splash) {
                 splash.classList.add("hide");
             }
-        }, 1800);
+
+            // 2. Open velvet stage curtains seamlessly
+            setTimeout(() => {
+                if (curtain) {
+                    curtain.classList.add("open");
+                }
+            }, 350);
+        }, 1600);
     };
 
     if (document.readyState === "complete") {
-        dismissSplash();
+        startTheaterCurtainEntry();
     } else {
-        window.addEventListener("load", dismissSplash);
+        window.addEventListener("load", startTheaterCurtainEntry);
     }
 })();
