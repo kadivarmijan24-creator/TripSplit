@@ -1,7 +1,8 @@
 /* =========================================================
    TripSplit
    Firebase + Persistent Trips + Recent Trips + Realtime Sync
-   Offline-First Optimistic Updates + Dark Theme Sync
+   Offline-First Optimistic Updates + Offline Sync Queue
+   Dark Theme Controller Integrated
 ========================================================= */
 
 import {
@@ -44,6 +45,7 @@ const CURRENT_KEY = "tripsplit_current_v5";
 const CACHE_KEY = "tripsplit_cache_v5";
 const RECENT_KEY = "tripsplit_recent_v5";
 const THEME_KEY = "tripsplit_theme_v1";
+const QUEUE_KEY = "tripsplit_pending_sync_v1";
 
 const state = {
     currentId: localStorage.getItem(CURRENT_KEY) || null,
@@ -66,6 +68,53 @@ function toggleTheme() {
     const current = document.documentElement.getAttribute("data-theme") || "light";
     const nextTheme = current === "dark" ? "light" : "dark";
     applyTheme(nextTheme);
+}
+
+
+/* =========================================================
+   OFFLINE SYNC QUEUE HELPERS
+========================================================= */
+
+function getPendingQueue() {
+    try {
+        return JSON.parse(localStorage.getItem(QUEUE_KEY) || "[]");
+    } catch (_) {
+        return [];
+    }
+}
+
+function addToSyncQueue(item) {
+    const queue = getPendingQueue();
+    queue.push(item);
+    localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+}
+
+async function processSyncQueue() {
+    if (!navigator.onLine) return;
+    const queue = getPendingQueue();
+    if (!queue.length) return;
+
+    const remainingQueue = [];
+
+    for (const task of queue) {
+        try {
+            if (task.type === "setExpense") {
+                await set(ref(db, `trips/${task.tripId}/expenses/${task.expense.id}`), task.expense);
+            } else if (task.type === "deleteExpense") {
+                await set(ref(db, `trips/${task.tripId}/expenses/${task.expenseId}`), null);
+            } else if (task.type === "addMember") {
+                await set(ref(db, `trips/${task.tripId}/members/${task.member.id}`), task.member);
+            }
+        } catch (err) {
+            console.warn("Queue sync retry pending:", task, err);
+            remainingQueue.push(task);
+        }
+    }
+
+    localStorage.setItem(QUEUE_KEY, JSON.stringify(remainingQueue));
+    if (queue.length > remainingQueue.length) {
+        toast("Offline entries synced to cloud ☁️");
+    }
 }
 
 
@@ -690,7 +739,7 @@ async function joinTrip() {
 
 
 /* =========================================================
-   ADD MEMBER (OFFLINE-CAPABLE)
+   ADD MEMBER (OFFLINE-CAPABLE + QUEUE)
 ========================================================= */
 
 function addMember() {
@@ -725,26 +774,41 @@ function addMember() {
         const memberId = uid();
         const newMember = { id: memberId, name };
 
-        // Local update
+        // Local state update
         trip.members.push(newMember);
         saveTripLocally(trip);
         renderTrip();
         closeModal();
         toast("Friend added 👥");
 
-        // Background Firebase write
-        try {
-            await set(ref(db, `trips/${trip.id}/members/${memberId}`), newMember);
-        } catch (error) {
-            console.warn("Member saved locally, background sync pending:", error);
+        // Sync logic with queue fallback
+        if (!navigator.onLine) {
+            addToSyncQueue({
+                type: "addMember",
+                tripId: trip.id,
+                member: newMember
+            });
             setSyncStatus(false);
+        } else {
+            try {
+                await set(ref(db, `trips/${trip.id}/members/${memberId}`), newMember);
+                setSyncStatus(true);
+            } catch (error) {
+                console.warn("Live add failed, added to queue:", error);
+                addToSyncQueue({
+                    type: "addMember",
+                    tripId: trip.id,
+                    member: newMember
+                });
+                setSyncStatus(false);
+            }
         }
     };
 }
 
 
 /* =========================================================
-   EXPENSE FORM (OFFLINE-FIRST OPTIMISTIC UPDATE)
+   EXPENSE FORM (OFFLINE-FIRST + SYNC QUEUE SAFEGUARD)
 ========================================================= */
 
 function expenseForm(exp = null) {
@@ -828,7 +892,6 @@ function expenseForm(exp = null) {
         `
     );
 
-    // Category button selection handler
     document.querySelectorAll("#categoryPicker .category-btn").forEach(btn => {
         btn.onclick = () => {
             selectedCategory = btn.dataset.cat;
@@ -965,7 +1028,7 @@ function expenseForm(exp = null) {
             createdAt: exp?.createdAt || new Date().toISOString()
         };
 
-        // 1. INSTANT LOCAL UPDATE (Offline support)
+        // 1. INSTANT LOCAL UPDATE
         const expIndex = trip.expenses.findIndex(e => e.id === expenseId);
         if (expIndex >= 0) {
             trip.expenses[expIndex] = expense;
@@ -978,13 +1041,28 @@ function expenseForm(exp = null) {
         closeModal();
         toast(isEdit ? "Expense updated 💾" : "Expense added 💸");
 
-        // 2. BACKGROUND FIREBASE SYNC
-        try {
-            await set(ref(db, `trips/${trip.id}/expenses/${expenseId}`), expense);
-            setSyncStatus(true);
-        } catch (error) {
-            console.warn("Saved locally, pending network sync:", error);
+        // 2. QUEUE & CLOUD SYNC
+        if (!navigator.onLine) {
+            addToSyncQueue({
+                type: "setExpense",
+                tripId: trip.id,
+                expense: expense
+            });
             setSyncStatus(false);
+            toast("Saved offline. Will sync when online 📱");
+        } else {
+            try {
+                await set(ref(db, `trips/${trip.id}/expenses/${expenseId}`), expense);
+                setSyncStatus(true);
+            } catch (error) {
+                console.warn("Live save failed, saved to sync queue:", error);
+                addToSyncQueue({
+                    type: "setExpense",
+                    tripId: trip.id,
+                    expense: expense
+                });
+                setSyncStatus(false);
+            }
         }
     };
 }
@@ -1004,13 +1082,26 @@ async function deleteExpense(id) {
     renderTrip();
     toast("Expense deleted.");
 
-    // Background Firebase removal
-    try {
-        await set(ref(db, `trips/${trip.id}/expenses/${id}`), null);
-        setSyncStatus(true);
-    } catch (error) {
-        console.warn("Deleted locally, pending network sync:", error);
+    if (!navigator.onLine) {
+        addToSyncQueue({
+            type: "deleteExpense",
+            tripId: trip.id,
+            expenseId: id
+        });
         setSyncStatus(false);
+    } else {
+        try {
+            await set(ref(db, `trips/${trip.id}/expenses/${id}`), null);
+            setSyncStatus(true);
+        } catch (error) {
+            console.warn("Live delete failed, queued for sync:", error);
+            addToSyncQueue({
+                type: "deleteExpense",
+                tripId: trip.id,
+                expenseId: id
+            });
+            setSyncStatus(false);
+        }
     }
 }
 
@@ -1399,10 +1490,14 @@ $("overviewAddMember")?.addEventListener("click", addMember);
 $("addExpenseBtn")?.addEventListener("click", () => expenseForm());
 $("overviewAddExpense")?.addEventListener("click", () => expenseForm());
 
-// Online / Offline window events for sync status
-window.addEventListener("online", () => {
+// Online / Offline window events for sync status & queue flushing
+window.addEventListener("online", async () => {
     setSyncStatus(true);
     toast("Back online 🌐");
+    
+    // Process all pending offline modifications first
+    await processSyncQueue();
+
     const id = state.currentId;
     if (id) refreshTripFromFirebase(id);
 });
@@ -1515,6 +1610,11 @@ window.addEventListener("pagehide", () => {
     }
 
     setSyncStatus(navigator.onLine);
+
+    // If loaded online, flush any pending offline queues immediately
+    if (navigator.onLine) {
+        processSyncQueue();
+    }
 
     const dismissSplash = () => {
         setTimeout(() => {
