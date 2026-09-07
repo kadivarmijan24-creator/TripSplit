@@ -4,8 +4,8 @@
   "description": "Split trip expenses with friends.",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#D2042D",
-  "theme_color": "#D2042D",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "orientation": "portrait",
   "icons": [
     {

@@ -649,24 +649,6 @@ label {
     font-weight: 850;
 }
 
-.share-summary-pill {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    background: #25D366;
-    color: #ffffff;
-    padding: 7px 12px;
-    border-radius: 11px;
-    font-size: 11px;
-    font-weight: 800;
-    box-shadow: 0 4px 14px rgba(37, 211, 102, 0.28);
-    transition: .2s ease;
-}
-
-.share-summary-pill:active {
-    transform: scale(0.96);
-}
-
 /* =====================================================
    LISTS & CARDS
 ===================================================== */
@@ -1088,7 +1070,7 @@ label {
 }
 
 /* =====================================================
-   LUXURIOUS SPLASH SCREEN ANIMATIONS
+   LUXURIOUS SPLASH SCREEN ANIMATIONS (SYNCHRONIZED)
 ===================================================== */
 .splash-screen {
     position: fixed;
@@ -1099,7 +1081,7 @@ label {
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    /* Transition duration 0.65s se badha kar 0.85s ki gayi hai */
+    will-change: opacity, transform;
     transition: opacity 0.85s cubic-bezier(0.16, 1, 0.3, 1),
                 transform 0.85s cubic-bezier(0.16, 1, 0.3, 1),
                 visibility 0.85s ease;
@@ -1108,15 +1090,15 @@ label {
 .splash-screen.hide {
     opacity: 0;
     visibility: hidden;
-    transform: scale(1.08);
+    transform: scale(1.06);
     pointer-events: none;
 }
 
 .splash-backdrop-glow {
     position: absolute;
-    width: 320px;
-    height: 320px;
-    background: radial-gradient(circle, rgba(237, 49, 85, 0.22) 0%, rgba(210, 4, 45, 0.08) 50%, transparent 75%);
+    width: 340px;
+    height: 340px;
+    background: radial-gradient(circle, rgba(237, 49, 85, 0.18) 0%, rgba(210, 4, 45, 0.05) 55%, transparent 75%);
     border-radius: 50%;
     animation: glowPulse 2.4s ease-in-out infinite alternate;
 }
@@ -1128,7 +1110,8 @@ label {
     flex-direction: column;
     align-items: center;
     gap: 20px;
-    animation: luxuriousEntrance 0.9s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    will-change: transform, opacity;
+    animation: luxuriousEntrance 1.0s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .splash-icon-box {
@@ -1140,6 +1123,7 @@ label {
     background: linear-gradient(140deg, #ED3155 0%, #D2042D 60%, #90021e 100%);
     box-shadow: 0 18px 45px rgba(210, 4, 45, 0.32),
                 inset 0 1px 1.5px rgba(255, 255, 255, 0.7);
+    will-change: transform;
     animation: logoFloat 2.6s ease-in-out infinite alternate;
 }
 
@@ -1173,8 +1157,8 @@ label {
 @keyframes luxuriousEntrance {
     0% {
         opacity: 0;
-        transform: translateY(32px) scale(0.9);
-        filter: blur(8px);
+        transform: translateY(28px) scale(0.92);
+        filter: blur(6px);
     }
     100% {
         opacity: 1;
@@ -1184,7 +1168,7 @@ label {
 }
 
 @keyframes glowPulse {
-    0% { transform: scale(0.85); opacity: 0.6; }
+    0% { transform: scale(0.85); opacity: 0.5; }
     100% { transform: scale(1.25); opacity: 1; }
 }
 
@@ -1198,6 +1182,7 @@ label {
         box-shadow: 0 24px 55px rgba(210, 4, 45, 0.42);
     }
 }
+
 /* =====================================================
    MODAL CATEGORY BUTTONS GRID
 ===================================================== */
@@ -1234,10 +1219,10 @@ label {
     border-color: transparent;
     box-shadow: 0 6px 18px rgba(210, 4, 45, 0.28);
 }
+
 /* =====================================================
    WHATSAPP SETTLEMENT SHARE PILL
 ===================================================== */
-
 .share-summary-pill {
     display: inline-flex;
     align-items: center;

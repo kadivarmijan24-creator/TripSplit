@@ -812,7 +812,7 @@ function expenseForm(exp = null) {
             document.querySelectorAll("#categoryPicker .category-btn").forEach(b => b.classList.remove("active"));
             btn.classList.add("active");
 
-            // Agar name field khali hai toh auto-fill label
+            // Auto-fill suggestion if name is empty
             const nameInput = $("expenseName");
             if (!nameInput.value.trim()) {
                 const labelText = btn.textContent.trim().split(" ").slice(1).join(" ");
@@ -1144,7 +1144,7 @@ function renderExpenses() {
 
     let expenses = [...trip.expenses].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-    // Filter by selected chip category
+    // Filter by category
     if (state.categoryFilter !== "all") {
         expenses = expenses.filter(exp => expenseVisual(exp.name, exp.category).type === state.categoryFilter);
     }
@@ -1356,7 +1356,7 @@ $("overviewAddMember")?.addEventListener("click", addMember);
 $("addExpenseBtn")?.addEventListener("click", () => expenseForm());
 $("overviewAddExpense")?.addEventListener("click", () => expenseForm());
 
-// Recent trip open vs remove handlers
+// Recent trip open vs remove
 $("recentTripsList")?.addEventListener("click", event => {
     const delBtn = event.target.closest("[data-delete-recent]");
     if (delBtn) {
@@ -1454,10 +1454,19 @@ window.addEventListener("pagehide", () => {
         }
     }
 
-    setTimeout(() => {
-        const splash = $("splashScreen");
-        if (splash) {
-            splash.classList.add("hide");
-        }
-    }, 1100);
+    // Phone aur Laptop dono me exactly identical duration (1.8s)
+    const dismissSplash = () => {
+        setTimeout(() => {
+            const splash = $("splashScreen");
+            if (splash) {
+                splash.classList.add("hide");
+            }
+        }, 1800);
+    };
+
+    if (document.readyState === "complete") {
+        dismissSplash();
+    } else {
+        window.addEventListener("load", dismissSplash);
+    }
 })();
