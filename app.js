@@ -3,7 +3,7 @@
    Firebase + Persistent Trips + Recent Trips + Realtime Sync
    Offline-First Optimistic Updates + Offline Sync Queue
    Dark Theme Controller + 10s Audio Roulette
-   Curtain Reveal Entry Sequence + Interactive Visual Debt Flow
+   Aperture Iris Reveal Entry Sequence + Visual Debt Flow
 ========================================================= */
 
 import {
@@ -1489,7 +1489,6 @@ function initDebtGraph() {
     const centerY = height / 2;
     const radius = Math.min(width, height) * 0.36;
 
-    // Preserving positions if existing
     const oldNodeMap = new Map();
     graphNodes.forEach(n => oldNodeMap.set(n.id, { x: n.x, y: n.y }));
 
@@ -1514,7 +1513,6 @@ function initDebtGraph() {
         };
     });
 
-    // Generate flowing money particles along debt paths
     const debtList = settlements();
     graphParticles = [];
     debtList.forEach((debt, index) => {
@@ -1558,7 +1556,6 @@ function setupGraphEvents(canvas, width, height) {
         return null;
     }
 
-    // Touch / Mouse Start
     const onStart = e => {
         const pos = getPos(e);
         const hit = findNodeAt(pos.x, pos.y);
@@ -1572,7 +1569,6 @@ function setupGraphEvents(canvas, width, height) {
         }
     };
 
-    // Touch / Mouse Move
     const onMove = e => {
         const pos = getPos(e);
         if (draggedNode) {
@@ -1584,7 +1580,6 @@ function setupGraphEvents(canvas, width, height) {
         }
     };
 
-    // Touch / Mouse End
     const onEnd = () => {
         draggedNode = null;
     };
@@ -1626,7 +1621,6 @@ function renderGraphLoop(ctx, width, height) {
 
     ctx.clearRect(0, 0, width, height);
 
-    // Spring center pull force for soft physics
     const cx = width / 2;
     const cy = height / 2;
     graphNodes.forEach(n => {
@@ -1640,7 +1634,7 @@ function renderGraphLoop(ctx, width, height) {
         }
     });
 
-    // 1. Draw connecting glowing lines & arrows
+    // 1. Connecting debt lines & arrows
     debts.forEach(debt => {
         const fromNode = graphNodes.find(n => n.id === debt.from);
         const toNode = graphNodes.find(n => n.id === debt.to);
@@ -1649,7 +1643,6 @@ function renderGraphLoop(ctx, width, height) {
         const isHighlighted = !selectedNode || (selectedNode.id === fromNode.id || selectedNode.id === toNode.id);
         const alpha = isHighlighted ? (isDark ? 0.85 : 0.75) : 0.15;
 
-        // Line
         ctx.beginPath();
         ctx.moveTo(fromNode.x, fromNode.y);
         ctx.lineTo(toNode.x, toNode.y);
@@ -1657,7 +1650,6 @@ function renderGraphLoop(ctx, width, height) {
         ctx.lineWidth = isHighlighted ? 2.5 : 1.2;
         ctx.stroke();
 
-        // Direction Arrow in middle
         const midX = (fromNode.x + toNode.x) / 2;
         const midY = (fromNode.y + toNode.y) / 2;
         const angle = Math.atan2(toNode.y - fromNode.y, toNode.x - fromNode.x);
@@ -1673,7 +1665,6 @@ function renderGraphLoop(ctx, width, height) {
         ctx.closePath();
         ctx.fill();
 
-        // Amount Tag Box
         if (isHighlighted) {
             ctx.rotate(-angle);
             ctx.font = "bold 10px 'Inter', sans-serif";
@@ -1699,7 +1690,7 @@ function renderGraphLoop(ctx, width, height) {
         ctx.restore();
     });
 
-    // 2. Animated Flow Particles (Money in transit)
+    // 2. Animated Flow Particles
     graphParticles.forEach(p => {
         p.progress += p.speed;
         if (p.progress > 1) p.progress = 0;
@@ -1723,7 +1714,7 @@ function renderGraphLoop(ctx, width, height) {
         ctx.shadowBlur = 0;
     });
 
-    // 3. Draw Member Bubbles
+    // 3. Member Bubbles
     graphNodes.forEach(node => {
         const isSelected = selectedNode && selectedNode.id === node.id;
         const isDimmed = selectedNode && !isSelected;
@@ -1731,7 +1722,6 @@ function renderGraphLoop(ctx, width, height) {
         ctx.save();
         ctx.globalAlpha = isDimmed ? 0.4 : 1;
 
-        // Outer Glow Aura
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.radius + (isSelected ? 6 : 2), 0, Math.PI * 2);
         if (node.isCreditor) {
@@ -1743,7 +1733,6 @@ function renderGraphLoop(ctx, width, height) {
         }
         ctx.fill();
 
-        // Main Bubble Circle
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
 
@@ -1762,7 +1751,6 @@ function renderGraphLoop(ctx, width, height) {
         ctx.fill();
         ctx.stroke();
 
-        // Member Initial / Avatar Text
         ctx.font = `bold ${Math.round(node.radius * 0.58)}px 'Inter', sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
@@ -1772,7 +1760,6 @@ function renderGraphLoop(ctx, width, height) {
         }
         ctx.fillText(node.name.charAt(0).toUpperCase(), node.x, node.y - 1);
 
-        // Member Name Pill below bubble
         ctx.font = "bold 10px 'Inter', sans-serif";
         ctx.fillStyle = isDark ? "#f0e6eb" : "#30272b";
         ctx.fillText(node.name, node.x, node.y + node.radius + 12);
@@ -1826,7 +1813,6 @@ function openRouletteModal() {
         `
     );
 
-    // Ensure custom font 'Inter' is active in Canvas before rendering
     if (document.fonts && document.fonts.ready) {
         document.fonts.ready.then(() => drawRouletteWheel(trip.members));
     } else {
@@ -1942,7 +1928,6 @@ function drawRouletteWheel(members) {
         ctx.rotate(angle + arc / 2);
         ctx.textAlign = "right";
         ctx.fillStyle = "#ffffff";
-        // Enforcing app Inter font stack
         ctx.font = "bold 24px 'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
         ctx.fillText(m.name, radius - 30, 9);
         ctx.restore();
@@ -2218,26 +2203,25 @@ window.addEventListener("pagehide", () => {
         processSyncQueue();
     }
 
-    const startTheaterCurtainEntry = () => {
+    // LUXURY APERTURE / IRIS LENS PORTAL REVEAL
+    const startApertureReveal = () => {
         setTimeout(() => {
-            const splash = $("splashScreen");
-            const curtain = $("curtainWrapper");
+            const portal = $("portalScreen");
+            if (!portal) return;
 
-            if (splash) {
-                splash.classList.add("hide");
-            }
+            // 1. Iris camera blades unlock & rotate open
+            portal.classList.add("open-iris");
 
+            // 2. Smoothly fade out portal layer after reveal
             setTimeout(() => {
-                if (curtain) {
-                    curtain.classList.add("open");
-                }
-            }, 350);
-        }, 1600);
+                portal.classList.add("dismiss");
+            }, 850);
+        }, 1500);
     };
 
     if (document.readyState === "complete") {
-        startTheaterCurtainEntry();
+        startApertureReveal();
     } else {
-        window.addEventListener("load", startTheaterCurtainEntry);
+        window.addEventListener("load", startApertureReveal);
     }
 })();
