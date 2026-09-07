@@ -2,204 +2,329 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+
 <meta name="theme-color" content="#D2042D">
 <meta name="description" content="TripSplit - split trip expenses with friends.">
+
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="style.css">
+
 <title>TripSplit</title>
 </head>
-<body>
-<div id="app" class="app">
-  <header class="app-header">
-    <button id="backBtn" class="icon-btn hidden" aria-label="Back">←</button>
-    <div class="brand"><div class="brand-mark">TS</div><div><b>TripSplit</b><span>Travel. Split. Settle.</span></div></div>
-    <button id="homeBtn" class="icon-btn" aria-label="Home">⌂</button>
-  </header>
 
-  <main>
-    <section id="homeView" class="view active">
-      <div class="hero-card">
-        <div class="hero-icon">✈️</div>
-        <h1>Split the trip.<br><span>Not the friendship.</span></h1>
+<body>
+
+<!-- LUXURIOUS SPLASH SCREEN -->
+<div id="splashScreen" class="splash-screen">
+    <div class="splash-backdrop-glow"></div>
+    <div class="splash-content">
+        <div class="splash-icon-box">
+            <svg class="splash-svg-logo" width="46" height="46" viewBox="0 0 48 48" fill="none">
+                <circle cx="24" cy="24" r="22" stroke="rgba(255,255,255,0.25)" stroke-width="2"/>
+                <path d="M14 17C14 17 21 14 24 24C27 34 34 31 34 31" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round"/>
+                <circle cx="14" cy="17" r="4.5" fill="#ffffff"/>
+                <circle cx="34" cy="31" r="4.5" fill="#ffffff"/>
+                <circle cx="24" cy="24" r="3" fill="#FFE2E6"/>
+            </svg>
+        </div>
+        <div class="splash-text">
+            <h2>TripSplit</h2>
+            <div class="splash-subtitle">
+                <span>TRAVEL</span>
+                <span class="dot">•</span>
+                <span>SPLIT</span>
+                <span class="dot">•</span>
+                <span>SETTLE</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="app" class="app">
+
+<header class="app-header">
+    <button id="backBtn" class="icon-btn hidden" aria-label="Back">←</button>
+
+    <div class="brand">
+        <div class="brand-mark">
+            <svg width="22" height="22" viewBox="0 0 48 48" fill="none">
+                <path d="M14 17C14 17 21 14 24 24C27 34 34 31 34 31" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round"/>
+                <circle cx="14" cy="17" r="4.5" fill="#ffffff"/>
+                <circle cx="34" cy="31" r="4.5" fill="#ffffff"/>
+            </svg>
+        </div>
+
+        <div>
+            <b>TripSplit</b>
+            <div class="header-sub-row">
+                <span>Travel. Split. Settle.</span>
+                <div id="syncBadge" class="sync-badge synced">
+                    <span class="sync-dot"></span>
+                    <small id="syncText">Synced</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <button id="homeBtn" class="icon-btn" aria-label="Home">⌂</button>
+</header>
+
+<main>
+
+<!-- HOME VIEW -->
+<section id="homeView" class="view active">
+    <div class="hero-card">
+        <div class="hero-icon-box">
+            <svg width="34" height="34" viewBox="0 0 48 48" fill="none">
+                <path d="M14 17C14 17 21 14 24 24C27 34 34 31 34 31" stroke="#D2042D" stroke-width="4" stroke-linecap="round"/>
+                <circle cx="14" cy="17" r="4.5" fill="#D2042D"/>
+                <circle cx="34" cy="31" r="4.5" fill="#ED3155"/>
+                <circle cx="24" cy="24" r="3" fill="#D2042D"/>
+            </svg>
+        </div>
+
+        <h1>
+            Split the trip.<br>
+            <span>Not the friendship.</span>
+        </h1>
+
         <p>Track expenses, split bills and see exactly who owes whom.</p>
-      </div>
-      <div class="action-stack">
+    </div>
+
+    <div class="action-stack">
         <button id="createTripBtn" class="btn btn-primary">＋ Create Trip</button>
         <button id="joinTripBtn" class="btn btn-secondary">↗ Join Trip</button>
-      </div>
-      <div class="feature-grid">
-        <div><span>💰</span><b>Smart Splits</b><small>Equal or custom amounts</small></div>
-        <div><span>👥</span><b>Any Group</b><small>Add unlimited friends</small></div>
-        <div><span>🧮</span><b>Auto Settlement</b><small>Minimum payments</small></div>
-        <div><span>📱</span><b>App Ready</b><small>Installable PWA</small></div>
-      </div>
-    </section>
-
-    <section id="createView" class="view">
-      <div class="page-title"><h2>Create Trip</h2><p>Start a new expense group.</p></div>
-      <label>Trip Name</label><input id="tripName" placeholder="e.g. Goa Trip" maxlength="50">
-      <label>Your Name</label><input id="creatorName" placeholder="e.g. Moin" maxlength="40">
-      <button id="createConfirmBtn" class="btn btn-primary full">Create Trip</button>
-    </section>
-
-    <section id="joinView" class="view">
-      <div class="page-title"><h2>Join Trip</h2><p>Use the code shared by your friend.</p></div>
-      <label>Trip Code</label><input id="joinCode" class="code-field" placeholder="ABC123" maxlength="6" autocomplete="off">
-      <label>Your Name</label><input id="joinName" placeholder="e.g. Ali" maxlength="40">
-      <button id="joinConfirmBtn" class="btn btn-primary full">Join Trip</button>
-      <div class="notice">Enter your friend's 6-character trip code to join the same trip in real time.</div>
-    </section>
-
-    <section id="tripView" class="view">
-
-  <div class="trip-hero">
-    <div>
-      <small>TRIP</small>
-      <h2 id="tripTitle">Trip</h2>
-      <span id="tripMemberCount">0 members</span>
-    </div>
-    <button id="shareBtn" class="round-btn">↗</button>
-  </div>
-
-  <div class="code-card">
-    <div>
-      <small>TRIP CODE</small>
-      <strong id="tripCode">------</strong>
-    </div>
-    <button id="copyCodeBtn">Copy</button>
-  </div>
-
-  <!-- OVERVIEW -->
-  <div id="tabOverview" class="tab-content active">
-
-    <div class="stats">
-      <div class="stat">
-        <small>Total Expense</small>
-        <b id="totalExpense">₹0</b>
-      </div>
-
-      <div class="stat">
-        <small>Members</small>
-        <b id="totalMembers">0</b>
-      </div>
     </div>
 
-    <div class="section-head">
-      <h3>Quick Actions</h3>
+    <!-- RECENT TRIPS -->
+    <div id="recentTripsSection" class="recent-section hidden">
+        <div class="section-head recent-head">
+            <div>
+                <h3>Recent Trips</h3>
+                <small>Tap to open, ✕ to remove</small>
+            </div>
+            <button id="clearRecentBtn" class="text-btn">Clear All</button>
+        </div>
+        <div id="recentTripsList" class="recent-trips-list"></div>
     </div>
 
-    <div class="quick-grid">
-      <button class="quick-card" id="overviewAddExpense">
-        <span>💸</span>
-        <b>Add Expense</b>
-        <small>Record a payment</small>
-      </button>
+    <div class="feature-grid">
+        <div>
+            <span>💰</span>
+            <b>Smart Splits</b>
+            <small>Equal or custom amounts</small>
+        </div>
+        <div>
+            <span>👥</span>
+            <b>Any Group</b>
+            <small>Add unlimited friends</small>
+        </div>
+        <div>
+            <span>🧮</span>
+            <b>Auto Settlement</b>
+            <small>Minimum payments</small>
+        </div>
+        <div>
+            <span>📱</span>
+            <b>App Ready</b>
+            <small>Installable PWA</small>
+        </div>
+    </div>
+</section>
 
-      <button class="quick-card" id="overviewAddMember">
-        <span>👥</span>
-        <b>Add Friend</b>
-        <small>Add someone to trip</small>
-      </button>
+<!-- CREATE VIEW -->
+<section id="createView" class="view">
+    <div class="page-title">
+        <h2>Create Trip</h2>
+        <p>Start a new expense group.</p>
+    </div>
+    <label>Trip Name</label>
+    <input id="tripName" placeholder="e.g. Goa Trip" maxlength="50">
+    <label>Your Name</label>
+    <input id="creatorName" placeholder="e.g. Moin" maxlength="40">
+    <button id="createConfirmBtn" class="btn btn-primary full">Create Trip</button>
+</section>
+
+<!-- JOIN VIEW -->
+<section id="joinView" class="view">
+    <div class="page-title">
+        <h2>Join Trip</h2>
+        <p>Use the code shared by your friend.</p>
+    </div>
+    <label>Trip Code</label>
+    <input id="joinCode" class="code-field" placeholder="ABC123" maxlength="6" autocomplete="off">
+    <label>Your Name</label>
+    <input id="joinName" placeholder="e.g. Ali" maxlength="40">
+    <button id="joinConfirmBtn" class="btn btn-primary full">Join Trip</button>
+    <div class="notice">
+        Enter your friend's 6-character trip code to join the same trip in real time.
+    </div>
+</section>
+
+<!-- TRIP VIEW -->
+<section id="tripView" class="view">
+    <div class="trip-hero">
+        <div>
+            <small>TRIP</small>
+            <h2 id="tripTitle">Trip</h2>
+            <span id="tripMemberCount">0 members</span>
+        </div>
+        <button id="shareBtn" class="round-btn" title="Share Trip Code">↗</button>
     </div>
 
-    <div class="section-head">
-      <h3>Recent Expenses</h3>
-      <button class="text-btn" data-tab="expenses">View All</button>
+    <div class="code-card">
+        <div>
+            <small>TRIP CODE</small>
+            <strong id="tripCode">------</strong>
+        </div>
+        <button id="copyCodeBtn">Copy</button>
     </div>
 
-    <div id="recentExpensesList" class="list"></div>
+    <!-- OVERVIEW TAB -->
+    <div id="tabOverview" class="tab-content active">
+        <div class="stats">
+            <div class="stat">
+                <small>Total Expense</small>
+                <b id="totalExpense">₹0</b>
+            </div>
+            <div class="stat">
+                <small>Members</small>
+                <b id="totalMembers">0</b>
+            </div>
+        </div>
 
-  </div>
+        <div class="section-head">
+            <h3>Quick Actions</h3>
+        </div>
 
-  <!-- MEMBERS -->
-  <div id="tabMembers" class="tab-content">
+        <div class="quick-grid">
+            <button class="quick-card" id="overviewAddExpense">
+                <span>💸</span>
+                <b>Add Expense</b>
+                <small>Record a payment</small>
+            </button>
+            <button class="quick-card" id="overviewAddMember">
+                <span>👥</span>
+                <b>Add Friend</b>
+                <small>Add someone to trip</small>
+            </button>
+        </div>
 
-    <div class="section-head">
-      <h3>Members</h3>
-      <button id="addMemberBtn" class="text-btn">＋ Add</button>
+        <div class="section-head">
+            <h3>Recent Expenses</h3>
+            <button class="text-btn" data-tab="expenses">View All</button>
+        </div>
+        <div id="recentExpensesList" class="list"></div>
     </div>
 
-    <div id="membersList" class="list"></div>
-
-  </div>
-
-  <!-- EXPENSES -->
-  <div id="tabExpenses" class="tab-content">
-
-    <div class="section-head">
-      <h3>Expenses</h3>
-      <button id="addExpenseBtn" class="text-btn">＋ Add Expense</button>
+    <!-- MEMBERS TAB -->
+    <div id="tabMembers" class="tab-content">
+        <div class="section-head">
+            <h3>Members</h3>
+            <button id="addMemberBtn" class="text-btn">＋ Add</button>
+        </div>
+        <div id="membersList" class="list"></div>
     </div>
 
-    <div id="expensesList" class="list"></div>
+    <!-- EXPENSES TAB (WITH CATEGORY FILTER) -->
+    <div id="tabExpenses" class="tab-content">
+        <div class="section-head">
+            <h3>Expenses</h3>
+            <button id="addExpenseBtn" class="text-btn">＋ Add Expense</button>
+        </div>
 
-  </div>
+        <!-- Filter Chips -->
+        <div class="filter-chip-bar" id="categoryFilterBar">
+            <button class="filter-chip active" data-filter="all">All</button>
+            <button class="filter-chip" data-filter="food">🍔 Food</button>
+            <button class="filter-chip" data-filter="hotel">🏨 Stay</button>
+            <button class="filter-chip" data-filter="travel">🚕 Travel</button>
+            <button class="filter-chip" data-filter="fuel">⛽ Fuel</button>
+            <button class="filter-chip" data-filter="shopping">🛍️ Shopping</button>
+            <button class="filter-chip" data-filter="fun">🎬 Fun</button>
+            <button class="filter-chip" data-filter="other">💸 Other</button>
+        </div>
 
-  <!-- BALANCES -->
-  <div id="tabBalances" class="tab-content">
-
-    <div class="section-head">
-      <h3>Balances</h3>
+        <div id="expensesList" class="list"></div>
     </div>
 
-    <div id="balancesList" class="list"></div>
-
-  </div>
-
-  <!-- SETTLEMENT -->
-  <div id="tabSettlement" class="tab-content">
-
-    <div class="section-head">
-      <h3>Settlement</h3>
+    <!-- BALANCES TAB -->
+    <div id="tabBalances" class="tab-content">
+        <div class="section-head">
+            <h3>Balances</h3>
+        </div>
+        <div id="balancesList" class="list"></div>
     </div>
 
-    <div id="settlementList" class="list"></div>
-
-  </div>
-
+    <!-- SETTLEMENT TAB (WITH WHATSAPP SHARE) -->
+    <div id="tabSettlement" class="tab-content">
+        <div class="section-head">
+            <h3>Settlement</h3>
+            <button id="whatsappShareBtn" class="share-summary-pill" title="Send settlement breakdown on WhatsApp">
+                <span>💬</span> Share WhatsApp
+            </button>
+        </div>
+        <div id="settlementList" class="list"></div>
+    </div>
 </section>
 
 <!-- BOTTOM NAVIGATION -->
 <nav id="bottomNav" class="bottom-nav">
-
-  <button class="nav-item active" data-tab="overview">
-    <span>⌂</span>
-    <small>Home</small>
-  </button>
-
-  <button class="nav-item" data-tab="expenses">
-    <span>💸</span>
-    <small>Expenses</small>
-  </button>
-
-  <button class="nav-item" data-tab="members">
-    <span>👥</span>
-    <small>Members</small>
-  </button>
-
-  <button class="nav-item" data-tab="balances">
-    <span>⚖</span>
-    <small>Balances</small>
-  </button>
-
-  <button class="nav-item" data-tab="settlement">
-    <span>✓</span>
-    <small>Settle</small>
-  </button>
-
+    <button class="nav-item active" data-tab="overview">
+        <span>⌂</span>
+        <small>Home</small>
+    </button>
+    <button class="nav-item" data-tab="expenses">
+        <span>💸</span>
+        <small>Expenses</small>
+    </button>
+    <button class="nav-item" data-tab="members">
+        <span>👥</span>
+        <small>Members</small>
+    </button>
+    <button class="nav-item" data-tab="balances">
+        <span>⚖</span>
+        <small>Balances</small>
+    </button>
+    <button class="nav-item" data-tab="settlement">
+        <span>✓</span>
+        <small>Settle</small>
+    </button>
 </nav>
-  </main>
+
+</main>
 </div>
 
+<!-- MODAL -->
 <div id="modal" class="modal" aria-hidden="true">
-  <div class="modal-sheet">
-    <div class="modal-head"><div><h3 id="modalTitle">Add Expense</h3><p id="modalSubtitle">Record a payment.</p></div><button id="closeModal" class="close-btn">×</button></div>
-    <div id="modalBody"></div>
-  </div>
+    <div class="modal-sheet">
+        <div class="modal-head">
+            <div>
+                <h3 id="modalTitle">Add Expense</h3>
+                <p id="modalSubtitle">Record a payment.</p>
+            </div>
+            <button id="closeModal" class="close-btn">×</button>
+        </div>
+        <div id="modalBody"></div>
+    </div>
 </div>
+
 <div id="toast" class="toast"></div>
+
 <script type="module" src="app.js"></script>
-<script>if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));</script>
+
+<script>
+if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js").catch(() => {});
+    });
+}
+</script>
+
 </body>
 </html>
