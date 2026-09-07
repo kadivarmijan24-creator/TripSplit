@@ -3,7 +3,7 @@
    Firebase + Persistent Trips + Recent Trips + Realtime Sync
    Offline-First Optimistic Updates + Offline Sync Queue
    Dark Theme Controller + 10s Audio Roulette
-   Theater Curtain Reveal Entry Sequence
+   Curtain Reveal Entry Sequence + Interactive Visual Debt Flow
 ========================================================= */
 
 import {
@@ -52,7 +52,8 @@ const state = {
     currentId: localStorage.getItem(CURRENT_KEY) || null,
     trips: {},
     unsubscribe: null,
-    categoryFilter: "all"
+    categoryFilter: "all",
+    settleView: "graph"
 };
 
 
@@ -63,11 +64,14 @@ const state = {
 function applyTheme(theme) {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem(THEME_KEY, theme);
+    if (state.currentId) {
+        initDebtGraph();
+    }
 }
 
 function toggleTheme() {
-    const current = document.documentElement.getAttribute("data-theme") || "light";
-    const nextTheme = current === "dark" ? "light" : "dark";
+    const currentTheme = document.documentElement.getAttribute("data-theme") || "light";
+    const nextTheme = currentTheme === "dark" ? "light" : "dark";
     applyTheme(nextTheme);
 }
 
@@ -514,6 +518,10 @@ function openTab(tab) {
     document.querySelectorAll(".nav-item").forEach(btn => {
         btn.classList.toggle("active", btn.dataset.tab === tab);
     });
+
+    if (tab === "settlement") {
+        setTimeout(initDebtGraph, 60);
+    }
 }
 
 function openModal(title, subtitle, body) {
@@ -1412,6 +1420,8 @@ function renderSettlement() {
             <div class="settle-money">${money(item.amount)}</div>
         </div>
     `).join("");
+
+    initDebtGraph();
 }
 
 function renderTrip() {
@@ -1441,6 +1451,336 @@ function renderTrip() {
     if (tripView && !tripView.classList.contains("active")) {
         show("trip");
     }
+}
+
+
+/* =========================================================
+   INTERACTIVE VISUAL DEBT GRAPH ENGINE (BUBBLE FLOW UI)
+========================================================= */
+
+let graphNodes = [];
+let graphAnimId = null;
+let draggedNode = null;
+let hoveredNode = null;
+let selectedNode = null;
+let graphParticles = [];
+
+function initDebtGraph() {
+    const canvas = $("debtGraphCanvas");
+    if (!canvas) return;
+
+    const trip = current();
+    if (!trip || !trip.members || trip.members.length < 2) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const width = rect.width || 360;
+    const height = 330;
+
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+
+    const balanceMap = balances();
+    const memberCount = trip.members.length;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const radius = Math.min(width, height) * 0.36;
+
+    // Preserving positions if existing
+    const oldNodeMap = new Map();
+    graphNodes.forEach(n => oldNodeMap.set(n.id, { x: n.x, y: n.y }));
+
+    graphNodes = trip.members.map((member, i) => {
+        const old = oldNodeMap.get(member.id);
+        const angle = (i / memberCount) * (2 * Math.PI) - Math.PI / 2;
+        const initialX = old ? old.x : centerX + radius * Math.cos(angle);
+        const initialY = old ? old.y : centerY + radius * Math.sin(angle);
+        const net = balanceMap[member.id] || 0;
+
+        return {
+            id: member.id,
+            name: member.name,
+            x: initialX,
+            y: initialY,
+            vx: 0,
+            vy: 0,
+            radius: Math.max(25, Math.min(36, 26 + Math.abs(net) / 800)),
+            netBalance: net,
+            isCreditor: net > 0.01,
+            isDebtor: net < -0.01
+        };
+    });
+
+    // Generate flowing money particles along debt paths
+    const debtList = settlements();
+    graphParticles = [];
+    debtList.forEach((debt, index) => {
+        for (let p = 0; p < 3; p++) {
+            graphParticles.push({
+                fromId: debt.from,
+                toId: debt.to,
+                amount: debt.amount,
+                progress: (p / 3) + Math.random() * 0.15,
+                speed: 0.0035 + (index * 0.0004)
+            });
+        }
+    });
+
+    setupGraphEvents(canvas, width, height);
+
+    if (graphAnimId) cancelAnimationFrame(graphAnimId);
+    renderGraphLoop(ctx, width, height);
+}
+
+function setupGraphEvents(canvas, width, height) {
+    if (canvas._hasEvents) return;
+    canvas._hasEvents = true;
+
+    function getPos(e) {
+        const r = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return {
+            x: clientX - r.left,
+            y: clientY - r.top
+        };
+    }
+
+    function findNodeAt(x, y) {
+        for (let i = graphNodes.length - 1; i >= 0; i--) {
+            const node = graphNodes[i];
+            const dist = Math.hypot(node.x - x, node.y - y);
+            if (dist <= node.radius + 6) return node;
+        }
+        return null;
+    }
+
+    // Touch / Mouse Start
+    const onStart = e => {
+        const pos = getPos(e);
+        const hit = findNodeAt(pos.x, pos.y);
+        if (hit) {
+            draggedNode = hit;
+            selectedNode = hit;
+            updateGraphFocusInfo(hit);
+        } else {
+            selectedNode = null;
+            updateGraphFocusInfo(null);
+        }
+    };
+
+    // Touch / Mouse Move
+    const onMove = e => {
+        const pos = getPos(e);
+        if (draggedNode) {
+            draggedNode.x = Math.max(draggedNode.radius, Math.min(width - draggedNode.radius, pos.x));
+            draggedNode.y = Math.max(draggedNode.radius, Math.min(height - draggedNode.radius, pos.y));
+            if (e.cancelable) e.preventDefault();
+        } else {
+            hoveredNode = findNodeAt(pos.x, pos.y);
+        }
+    };
+
+    // Touch / Mouse End
+    const onEnd = () => {
+        draggedNode = null;
+    };
+
+    canvas.addEventListener("mousedown", onStart);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onEnd);
+
+    canvas.addEventListener("touchstart", onStart, { passive: false });
+    window.addEventListener("touchmove", onMove, { passive: false });
+    window.addEventListener("touchend", onEnd);
+}
+
+function updateGraphFocusInfo(node) {
+    const pill = $("graphSelectedInfo");
+    if (!pill) return;
+
+    if (!node) {
+        pill.classList.add("hidden");
+        return;
+    }
+
+    const net = node.netBalance;
+    let label = `<b>${esc(node.name)}</b>: `;
+    if (net > 0.01) {
+        label += `<span style="color:#23966B;">Gets back ${money(net)}</span>`;
+    } else if (net < -0.01) {
+        label += `<span style="color:#D2042D;">Needs to pay ${money(-net)}</span>`;
+    } else {
+        label += `<span style="color:var(--muted);">All settled up</span>`;
+    }
+    pill.innerHTML = label + " • Tap elsewhere to unfocus";
+    pill.classList.remove("hidden");
+}
+
+function renderGraphLoop(ctx, width, height) {
+    const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+    const debts = settlements();
+
+    ctx.clearRect(0, 0, width, height);
+
+    // Spring center pull force for soft physics
+    const cx = width / 2;
+    const cy = height / 2;
+    graphNodes.forEach(n => {
+        if (n !== draggedNode) {
+            n.vx += (cx - n.x) * 0.0006;
+            n.vy += (cy - n.y) * 0.0006;
+            n.vx *= 0.88;
+            n.vy *= 0.88;
+            n.x += n.vx;
+            n.y += n.vy;
+        }
+    });
+
+    // 1. Draw connecting glowing lines & arrows
+    debts.forEach(debt => {
+        const fromNode = graphNodes.find(n => n.id === debt.from);
+        const toNode = graphNodes.find(n => n.id === debt.to);
+        if (!fromNode || !toNode) return;
+
+        const isHighlighted = !selectedNode || (selectedNode.id === fromNode.id || selectedNode.id === toNode.id);
+        const alpha = isHighlighted ? (isDark ? 0.85 : 0.75) : 0.15;
+
+        // Line
+        ctx.beginPath();
+        ctx.moveTo(fromNode.x, fromNode.y);
+        ctx.lineTo(toNode.x, toNode.y);
+        ctx.strokeStyle = isDark ? `rgba(237, 49, 85, ${alpha})` : `rgba(210, 4, 45, ${alpha})`;
+        ctx.lineWidth = isHighlighted ? 2.5 : 1.2;
+        ctx.stroke();
+
+        // Direction Arrow in middle
+        const midX = (fromNode.x + toNode.x) / 2;
+        const midY = (fromNode.y + toNode.y) / 2;
+        const angle = Math.atan2(toNode.y - fromNode.y, toNode.x - fromNode.x);
+
+        ctx.save();
+        ctx.translate(midX, midY);
+        ctx.rotate(angle);
+        ctx.fillStyle = isDark ? `rgba(255, 255, 255, ${alpha})` : `rgba(210, 4, 45, ${alpha})`;
+        ctx.beginPath();
+        ctx.moveTo(6, 0);
+        ctx.lineTo(-4, -4);
+        ctx.lineTo(-4, 4);
+        ctx.closePath();
+        ctx.fill();
+
+        // Amount Tag Box
+        if (isHighlighted) {
+            ctx.rotate(-angle);
+            ctx.font = "bold 10px 'Inter', sans-serif";
+            const amtText = money(debt.amount);
+            const textWidth = ctx.measureText(amtText).width;
+
+            ctx.fillStyle = isDark ? "rgba(29, 23, 27, 0.92)" : "rgba(255, 255, 255, 0.95)";
+            ctx.shadowColor = "rgba(0,0,0,0.18)";
+            ctx.shadowBlur = 4;
+            ctx.beginPath();
+            ctx.roundRect(-textWidth / 2 - 5, -19, textWidth + 10, 15, 6);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            ctx.strokeStyle = isDark ? "rgba(237, 49, 85, 0.4)" : "rgba(210, 4, 45, 0.3)";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            ctx.fillStyle = isDark ? "#ff6080" : "#A80324";
+            ctx.textAlign = "center";
+            ctx.fillText(amtText, 0, -8);
+        }
+        ctx.restore();
+    });
+
+    // 2. Animated Flow Particles (Money in transit)
+    graphParticles.forEach(p => {
+        p.progress += p.speed;
+        if (p.progress > 1) p.progress = 0;
+
+        const fromNode = graphNodes.find(n => n.id === p.fromId);
+        const toNode = graphNodes.find(n => n.id === p.toId);
+        if (!fromNode || !toNode) return;
+
+        const isHighlighted = !selectedNode || (selectedNode.id === fromNode.id || selectedNode.id === toNode.id);
+        if (!isHighlighted) return;
+
+        const px = fromNode.x + (toNode.x - fromNode.x) * p.progress;
+        const py = fromNode.y + (toNode.y - fromNode.y) * p.progress;
+
+        ctx.beginPath();
+        ctx.arc(px, py, 2.8, 0, Math.PI * 2);
+        ctx.fillStyle = isDark ? "#ffffff" : "#D2042D";
+        ctx.shadowColor = isDark ? "#ffffff" : "#D2042D";
+        ctx.shadowBlur = 6;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+    });
+
+    // 3. Draw Member Bubbles
+    graphNodes.forEach(node => {
+        const isSelected = selectedNode && selectedNode.id === node.id;
+        const isDimmed = selectedNode && !isSelected;
+
+        ctx.save();
+        ctx.globalAlpha = isDimmed ? 0.4 : 1;
+
+        // Outer Glow Aura
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.radius + (isSelected ? 6 : 2), 0, Math.PI * 2);
+        if (node.isCreditor) {
+            ctx.fillStyle = "rgba(35, 150, 107, 0.18)";
+        } else if (node.isDebtor) {
+            ctx.fillStyle = "rgba(210, 4, 45, 0.18)";
+        } else {
+            ctx.fillStyle = "rgba(150, 150, 150, 0.14)";
+        }
+        ctx.fill();
+
+        // Main Bubble Circle
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+
+        if (node.isCreditor) {
+            ctx.fillStyle = isDark ? "#1b3a2b" : "#e6f8f0";
+            ctx.strokeStyle = "#23966B";
+        } else if (node.isDebtor) {
+            ctx.fillStyle = isDark ? "#3b161e" : "#ffeef1";
+            ctx.strokeStyle = "#D2042D";
+        } else {
+            ctx.fillStyle = isDark ? "#2a2227" : "#f2edf0";
+            ctx.strokeStyle = "rgba(180, 180, 180, 0.5)";
+        }
+
+        ctx.lineWidth = isSelected ? 3.5 : 2;
+        ctx.fill();
+        ctx.stroke();
+
+        // Member Initial / Avatar Text
+        ctx.font = `bold ${Math.round(node.radius * 0.58)}px 'Inter', sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = node.isCreditor ? "#23966B" : node.isDebtor ? "#D2042D" : "#807077";
+        if (isDark && (node.isCreditor || node.isDebtor)) {
+            ctx.fillStyle = node.isCreditor ? "#49dfa6" : "#ff6685";
+        }
+        ctx.fillText(node.name.charAt(0).toUpperCase(), node.x, node.y - 1);
+
+        // Member Name Pill below bubble
+        ctx.font = "bold 10px 'Inter', sans-serif";
+        ctx.fillStyle = isDark ? "#f0e6eb" : "#30272b";
+        ctx.fillText(node.name, node.x, node.y + node.radius + 12);
+
+        ctx.restore();
+    });
+
+    graphAnimId = requestAnimationFrame(() => renderGraphLoop(ctx, width, height));
 }
 
 
@@ -1486,7 +1826,12 @@ function openRouletteModal() {
         `
     );
 
-    drawRouletteWheel(trip.members);
+    // Ensure custom font 'Inter' is active in Canvas before rendering
+    if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(() => drawRouletteWheel(trip.members));
+    } else {
+        drawRouletteWheel(trip.members);
+    }
 
     let selectedWinner = null;
 
@@ -1597,8 +1942,9 @@ function drawRouletteWheel(members) {
         ctx.rotate(angle + arc / 2);
         ctx.textAlign = "right";
         ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 26px sans-serif";
-        ctx.fillText(m.name, radius - 30, 10);
+        // Enforcing app Inter font stack
+        ctx.font = "bold 24px 'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText(m.name, radius - 30, 9);
         ctx.restore();
     });
 
@@ -1724,6 +2070,31 @@ $("addExpenseBtn")?.addEventListener("click", () => expenseForm());
 $("overviewAddExpense")?.addEventListener("click", () => expenseForm());
 
 $("spinWheelBtn")?.addEventListener("click", openRouletteModal);
+
+// Settlement View Toggle Listeners (Visual Graph vs List)
+$("toggleGraphViewBtn")?.addEventListener("click", () => {
+    state.settleView = "graph";
+    $("toggleGraphViewBtn").classList.add("active");
+    $("toggleListViewBtn").classList.remove("active");
+    $("debtGraphContainer").classList.remove("hidden");
+    $("settlementList").classList.add("hidden");
+    initDebtGraph();
+});
+
+$("toggleListViewBtn")?.addEventListener("click", () => {
+    state.settleView = "list";
+    $("toggleListViewBtn").classList.add("active");
+    $("toggleGraphViewBtn").classList.remove("active");
+    $("debtGraphContainer").classList.add("hidden");
+    $("settlementList").classList.remove("hidden");
+});
+
+$("resetGraphBtn")?.addEventListener("click", () => {
+    selectedNode = null;
+    updateGraphFocusInfo(null);
+    initDebtGraph();
+    toast("Graph reset to center ↺");
+});
 
 // Online / Offline window events for sync status & queue flushing
 window.addEventListener("online", async () => {
@@ -1852,12 +2223,10 @@ window.addEventListener("pagehide", () => {
             const splash = $("splashScreen");
             const curtain = $("curtainWrapper");
 
-            // 1. Hide splash first
             if (splash) {
                 splash.classList.add("hide");
             }
 
-            // 2. Open velvet stage curtains seamlessly
             setTimeout(() => {
                 if (curtain) {
                     curtain.classList.add("open");
