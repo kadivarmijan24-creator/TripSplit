@@ -676,6 +676,147 @@ label {
 }
 
 /* =====================================================
+   ULTRA-LUXURY ANIMATED CREATOR SIGNATURE
+===================================================== */
+.luxury-signature-container {
+    position: relative;
+    margin: 42px auto 16px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: fit-content;
+}
+
+.signature-glow {
+    position: absolute;
+    width: 200px;
+    height: 48px;
+    background: radial-gradient(circle, rgba(237, 49, 85, 0.28) 0%, rgba(210, 4, 45, 0.08) 60%, transparent 80%);
+    border-radius: 40px;
+    filter: blur(12px);
+    z-index: 1;
+    animation: breathingGlow 3.5s ease-in-out infinite alternate;
+}
+
+.signature-capsule {
+    position: relative;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 13px;
+    padding: 9px 18px 9px 12px;
+    border-radius: 28px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(255, 240, 244, 0.88));
+    border: 1px solid rgba(210, 4, 45, 0.22);
+    box-shadow: 0 12px 32px rgba(130, 30, 50, 0.12),
+                inset 0 1px 1.5px rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    cursor: default;
+    will-change: transform;
+    animation: capsuleFloat 4s ease-in-out infinite alternate;
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
+}
+
+.signature-capsule:active {
+    transform: scale(0.95) !important;
+}
+
+[data-theme="dark"] .signature-capsule {
+    background: linear-gradient(135deg, rgba(32, 22, 28, 0.92), rgba(19, 13, 17, 0.96));
+    border-color: rgba(237, 49, 85, 0.32);
+    box-shadow: 0 14px 38px rgba(0, 0, 0, 0.5),
+                inset 0 1px 1px rgba(255, 255, 255, 0.12);
+}
+
+.creator-crest {
+    width: 32px;
+    height: 32px;
+    border-radius: 11px;
+    background: linear-gradient(135deg, #fff2f5, #ffe4eb);
+    border: 1px solid rgba(210, 4, 45, 0.18);
+    display: grid;
+    place-items: center;
+    box-shadow: 0 4px 12px rgba(210, 4, 45, 0.15);
+    animation: crestSpin 9s linear infinite;
+}
+
+[data-theme="dark"] .creator-crest {
+    background: linear-gradient(135deg, #2b1721, #1e1117);
+    border-color: rgba(237, 49, 85, 0.3);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.signature-details {
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+}
+
+.signature-details .sub-lead {
+    font-size: 8px;
+    letter-spacing: 1.6px;
+    font-weight: 800;
+    color: var(--muted);
+    line-height: 1;
+    margin-bottom: 3px;
+}
+
+.creator-name {
+    font-size: 13.5px;
+    font-weight: 900;
+    letter-spacing: 0.6px;
+    line-height: 1.1;
+    background: linear-gradient(90deg, #90021e 0%, #D2042D 25%, #ED3155 50%, #ffffff 75%, #D2042D 100%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: metallicShimmer 4s linear infinite;
+}
+
+[data-theme="dark"] .creator-name {
+    background: linear-gradient(90deg, #ED3155 0%, #FF6685 25%, #ffd4dc 50%, #ffffff 75%, #ED3155 100%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.verified-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #23966B;
+    box-shadow: 0 0 8px rgba(35, 150, 107, 0.8);
+    animation: pulseDot 2s infinite;
+}
+
+@keyframes metallicShimmer {
+    to { background-position: 200% center; }
+}
+
+@keyframes capsuleFloat {
+    0% { transform: translateY(0px); }
+    100% { transform: translateY(-5px); }
+}
+
+@keyframes breathingGlow {
+    0% { opacity: 0.45; transform: scale(0.92); }
+    100% { opacity: 0.95; transform: scale(1.15); }
+}
+
+@keyframes crestSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes pulseDot {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.35); opacity: 0.6; }
+}
+
+/* =====================================================
    PAGE TITLE & NOTICE
 ===================================================== */
 .page-title {
