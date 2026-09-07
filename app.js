@@ -1459,5 +1459,5 @@ window.addEventListener("pagehide", () => {
         if (splash) {
             splash.classList.add("hide");
         }
-    }, 350);
+    }, 1100);
 })();
