@@ -590,6 +590,78 @@ label {
 }
 
 /* =====================================================
+   TRIP PETI / ADVANCE POOL BANNER
+===================================================== */
+.peti-card {
+    margin-top: 14px;
+    padding: 16px 18px;
+    border-radius: 20px;
+    background: linear-gradient(135deg, rgba(35, 150, 107, 0.12), rgba(35, 150, 107, 0.04));
+    border: 1.5px solid rgba(35, 150, 107, 0.28);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 10px 25px rgba(35, 150, 107, 0.08);
+    transition: all 0.3s ease;
+}
+
+[data-theme="dark"] .peti-card {
+    background: linear-gradient(135deg, rgba(35, 150, 107, 0.18), rgba(20, 35, 28, 0.45));
+    border-color: rgba(35, 150, 107, 0.35);
+}
+
+.peti-card.low-balance {
+    background: linear-gradient(135deg, rgba(210, 4, 45, 0.12), rgba(210, 4, 45, 0.04));
+    border-color: rgba(210, 4, 45, 0.3);
+}
+
+.peti-badge {
+    font-size: 8.5px;
+    font-weight: 850;
+    letter-spacing: 1.5px;
+    color: var(--green);
+    background: rgba(35, 150, 107, 0.15);
+    padding: 2px 8px;
+    border-radius: 20px;
+    display: inline-block;
+    margin-bottom: 6px;
+}
+
+.low-balance .peti-badge {
+    color: var(--tomato);
+    background: rgba(210, 4, 45, 0.15);
+}
+
+.peti-balance-row small {
+    display: block;
+    font-size: 10px;
+    color: var(--muted);
+}
+
+.peti-balance-row b {
+    font-size: 24px;
+    font-weight: 900;
+    color: var(--green);
+}
+
+.low-balance .peti-balance-row b {
+    color: var(--tomato);
+}
+
+#petiMetaText {
+    font-size: 10px;
+    color: var(--muted);
+}
+
+.peti-add-btn {
+    height: 44px;
+    padding: 0 16px;
+    font-size: 12px;
+    border-radius: 13px;
+    white-space: nowrap;
+}
+
+/* =====================================================
    RECENT TRIPS WITH REMOVE BUTTON
 ===================================================== */
 .recent-section {
@@ -1054,7 +1126,7 @@ label {
 }
 
 /* =====================================================
-   TRIP DASHBOARD UI
+   TRIP DASHBOARD UI & BUTTON GROUP
 ===================================================== */
 .trip-hero {
     display: flex;
@@ -1089,6 +1161,12 @@ label {
     color: var(--muted);
 }
 
+.hero-btn-group {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+}
+
 .round-btn {
     width: 43px;
     height: 43px;
@@ -1097,12 +1175,47 @@ label {
     border: 1px solid rgba(210, 4, 45, .20);
     color: var(--tomato-dark);
     font-size: 18px;
+    display: grid;
+    place-items: center;
+    box-shadow: 0 5px 15px rgba(130, 30, 50, 0.06);
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s ease;
+}
+
+.round-btn:active {
+    transform: scale(0.92);
 }
 
 [data-theme="dark"] .round-btn {
     background: linear-gradient(145deg, #241c22, #1d161b);
     border-color: rgba(237, 49, 85, 0.24);
     color: #f7eef2;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.4);
+}
+
+.delete-trip-btn {
+    background: linear-gradient(145deg, #ffffff, #fff0f3) !important;
+    border: 1px solid rgba(210, 4, 45, 0.22) !important;
+    color: var(--tomato) !important;
+    box-shadow: 0 4px 14px rgba(210, 4, 45, 0.08);
+}
+
+.delete-trip-btn svg {
+    transition: transform 0.2s ease;
+}
+
+.delete-trip-btn:active {
+    background: #ffe3e8 !important;
+}
+
+.delete-trip-btn:active svg {
+    transform: rotate(-10deg);
+}
+
+[data-theme="dark"] .delete-trip-btn {
+    background: linear-gradient(145deg, #25161c, #1a0e14) !important;
+    border-color: rgba(237, 49, 85, 0.32) !important;
+    color: #ff5274 !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
 }
 
 .code-card {
@@ -1236,6 +1349,7 @@ label {
     display: flex;
     align-items: center;
     gap: 11px;
+    position: relative;
 }
 
 .avatar {
@@ -1247,6 +1361,12 @@ label {
     place-items: center;
     font-weight: 900;
     color: #fff;
+    flex: none;
+}
+
+.member-info {
+    flex: 1;
+    min-width: 0;
 }
 
 .member-card b {
@@ -1263,6 +1383,30 @@ label {
     color: var(--muted);
     font-size: 10px;
     margin-top: 3px;
+}
+
+.member-remove-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+    background: rgba(210, 4, 45, 0.08);
+    border: 1px solid rgba(210, 4, 45, 0.2);
+    color: var(--tomato);
+    font-size: 14px;
+    font-weight: 800;
+    display: grid;
+    place-items: center;
+    transition: 0.2s ease;
+}
+
+[data-theme="dark"] .member-remove-btn {
+    background: rgba(237, 49, 85, 0.16);
+    border-color: rgba(237, 49, 85, 0.32);
+    color: #ff6080;
+}
+
+.member-remove-btn:active {
+    transform: scale(0.92);
 }
 
 .expense-card-wrapper {

@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="manifest" href="manifest.json">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=2.3">
 
 <title>TripSplit</title>
 </head>
@@ -207,9 +207,22 @@
             <h2 id="tripTitle">Trip</h2>
             <span id="tripMemberCount">0 members</span>
         </div>
-        <div style="display: flex; gap: 8px;">
-            <button id="deleteTripBtn" class="round-btn delete-trip-btn hidden" title="Delete entire trip">🗑️</button>
-            <button id="shareBtn" class="round-btn" title="Share Trip Code">↗</button>
+        <div class="hero-btn-group">
+            <button id="deleteTripBtn" class="round-btn delete-trip-btn" title="Delete entire trip" aria-label="Delete Trip">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 6h18"/>
+                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                    <line x1="10" y1="11" x2="10" y2="17"/>
+                    <line x1="14" y1="11" x2="14" y2="17"/>
+                </svg>
+            </button>
+            <button id="shareBtn" class="round-btn" title="Share Trip Code" aria-label="Share Trip">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M7 17L17 7"/>
+                    <path d="M7 7h10v10"/>
+                </svg>
+            </button>
         </div>
     </div>
 
@@ -223,6 +236,21 @@
 
     <!-- OVERVIEW TAB -->
     <div id="tabOverview" class="tab-content active">
+        <!-- TRIP PETI (COMMON ADVANCE POOL BANNER) -->
+        <div class="peti-card" id="petiCard">
+            <div class="peti-left">
+                <span class="peti-badge">COMMON POOL</span>
+                <div class="peti-balance-row">
+                    <small>Peti Balance</small>
+                    <b id="petiBalanceDisplay">₹0</b>
+                </div>
+                <span id="petiMetaText">0 advance deposited</span>
+            </div>
+            <button class="btn btn-secondary peti-add-btn" id="addPetiMoneyBtn">
+                ＋ Add Advance
+            </button>
+        </div>
+
         <div class="stats">
             <div class="stat">
                 <small>Total Expense</small>
@@ -379,7 +407,7 @@
 
 <div id="toast" class="toast"></div>
 
-<script type="module" src="app.js"></script>
+<script type="module" src="app.js?v=2.3"></script>
 
 <script>
 if ("serviceWorker" in navigator) {

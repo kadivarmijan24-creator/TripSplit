@@ -4,6 +4,9 @@
    Offline-First Optimistic Updates + Offline Sync Queue
    Dark Theme Controller + 10s Audio Roulette
    Aperture Iris Reveal Entry Sequence + Visual Debt Flow
+   Creator Management: Member Removal + Full Trip Deletion
+   Trip Peti / Advance Pool (Common Fund) Auto-Deduct
+   Retroactive Fair Splits for Newly Joined Friends
 ========================================================= */
 
 import {
@@ -109,6 +112,18 @@ async function processSyncQueue() {
                 await set(ref(db, `trips/${task.tripId}/expenses/${task.expenseId}`), null);
             } else if (task.type === "addMember") {
                 await set(ref(db, `trips/${task.tripId}/members/${task.member.id}`), task.member);
+            } else if (task.type === "removeMember") {
+                await set(ref(db, `trips/${task.tripId}/members/${task.memberId}`), null);
+            } else if (task.type === "updatePeti") {
+                await update(ref(db, `trips/${task.tripId}`), {
+                    petiPool: task.petiPool,
+                    petiContributions: task.petiContributions
+                });
+            } else if (task.type === "deleteTrip") {
+                await update(ref(db), {
+                    [`trips/${task.tripId}`]: null,
+                    [`tripCodes/${task.code}`]: null
+                });
             }
         } catch (err) {
             console.warn("Queue sync retry pending:", task, err);
@@ -291,7 +306,7 @@ function expenseVisual(name, explicitCategory = null) {
 
 
 /* =========================================================
-   NORMALIZE TRIP
+   NORMALIZE TRIP (AUTO CREATOR RECOVERY & PETI SUPPORT)
 ========================================================= */
 
 function normalizeTrip(trip, id = null) {
@@ -300,17 +315,24 @@ function normalizeTrip(trip, id = null) {
     const membersObject = trip.members && typeof trip.members === "object" ? trip.members : {};
     const expensesObject = trip.expenses && typeof trip.expenses === "object" ? trip.expenses : {};
 
+    const membersList = Array.isArray(trip.members)
+        ? trip.members
+        : Object.entries(membersObject).map(([memberId, member]) => ({
+            id: member.id || memberId,
+            name: member.name || "Member"
+        }));
+
+    const creatorId = trip.creatorId || membersList[0]?.id || null;
+
     return {
         id: trip.id || id,
         name: trip.name || "Trip",
         code: trip.code || "",
         createdAt: trip.createdAt || new Date().toISOString(),
-        members: Array.isArray(trip.members)
-            ? trip.members
-            : Object.entries(membersObject).map(([memberId, member]) => ({
-                id: member.id || memberId,
-                name: member.name || "Member"
-            })),
+        creatorId: creatorId,
+        petiPool: Number(trip.petiPool || 0),
+        petiContributions: trip.petiContributions || {},
+        members: membersList,
         expenses: Array.isArray(trip.expenses)
             ? trip.expenses
             : Object.entries(expensesObject).map(([expenseId, expense]) => ({
@@ -592,7 +614,7 @@ function subscribeToTrip(tripId) {
                 }
                 delete state.trips[tripId];
                 show("home");
-                toast("Trip no longer exists.");
+                toast("Trip has been deleted or no longer exists.");
                 return;
             }
 
@@ -640,7 +662,10 @@ async function createTrip() {
             id,
             name,
             code,
+            creatorId: memberId,
             createdAt: new Date().toISOString(),
+            petiPool: 0,
+            petiContributions: {},
             members: {
                 [memberId]: {
                     id: memberId,
@@ -745,7 +770,7 @@ async function refreshTripFromFirebase(id) {
 
 
 /* =========================================================
-   JOIN TRIP
+   JOIN TRIP (AUTO RETROACTIVE RESPLIT FOR EQUAL EXPENSES)
 ========================================================= */
 
 async function joinTrip() {
@@ -786,11 +811,29 @@ async function joinTrip() {
 
         if (!existing) {
             const memberId = uid();
-            await set(ref(db, `trips/${tripId}/members/${memberId}`), {
-                id: memberId,
-                name
+            const newMember = { id: memberId, name };
+
+            await set(ref(db, `trips/${tripId}/members/${memberId}`), newMember);
+
+            const updates = {};
+            trip.members.push(newMember);
+
+            trip.expenses.forEach(exp => {
+                if (exp.splitMode === "equal") {
+                    if (!Array.isArray(exp.splitBetween)) {
+                        exp.splitBetween = trip.members.map(m => m.id);
+                    } else if (!exp.splitBetween.includes(memberId)) {
+                        exp.splitBetween.push(memberId);
+                    }
+                    updates[`trips/${tripId}/expenses/${exp.id}/splitBetween`] = exp.splitBetween;
+                }
             });
-            toast("Joined trip successfully 🎉");
+
+            if (Object.keys(updates).length > 0) {
+                await update(ref(db), updates);
+            }
+
+            toast("Joined trip! Retroactive splits updated 🎉");
         } else {
             toast("Welcome back 👋");
         }
@@ -812,7 +855,7 @@ async function joinTrip() {
 
 
 /* =========================================================
-   ADD MEMBER (OFFLINE-CAPABLE + QUEUE)
+   ADD MEMBER (RETROACTIVE SPLIT FOR ALL PREVIOUS BILLS)
 ========================================================= */
 
 function addMember() {
@@ -848,10 +891,22 @@ function addMember() {
         const newMember = { id: memberId, name };
 
         trip.members.push(newMember);
+
+        // Retroactive inclusion in all previous equal bills
+        trip.expenses.forEach(exp => {
+            if (exp.splitMode === "equal") {
+                if (!Array.isArray(exp.splitBetween)) {
+                    exp.splitBetween = trip.members.map(m => m.id);
+                } else if (!exp.splitBetween.includes(memberId)) {
+                    exp.splitBetween.push(memberId);
+                }
+            }
+        });
+
         saveTripLocally(trip);
         renderTrip();
         closeModal();
-        toast("Friend added 👥");
+        toast("Friend added & included in all splits 👥");
 
         if (!navigator.onLine) {
             addToSyncQueue({
@@ -859,10 +914,27 @@ function addMember() {
                 tripId: trip.id,
                 member: newMember
             });
+            trip.expenses.forEach(exp => {
+                if (exp.splitMode === "equal") {
+                    addToSyncQueue({
+                        type: "setExpense",
+                        tripId: trip.id,
+                        expense: exp
+                    });
+                }
+            });
             setSyncStatus(false);
         } else {
             try {
-                await set(ref(db, `trips/${trip.id}/members/${memberId}`), newMember);
+                const updates = {
+                    [`trips/${trip.id}/members/${memberId}`]: newMember
+                };
+                trip.expenses.forEach(exp => {
+                    if (exp.splitMode === "equal") {
+                        updates[`trips/${trip.id}/expenses/${exp.id}/splitBetween`] = exp.splitBetween;
+                    }
+                });
+                await update(ref(db), updates);
                 setSyncStatus(true);
             } catch (error) {
                 console.warn("Live add failed, added to queue:", error);
@@ -879,7 +951,200 @@ function addMember() {
 
 
 /* =========================================================
-   EXPENSE FORM (OFFLINE-FIRST + SYNC QUEUE SAFEGUARD)
+   TRIP PETI / COMMON ADVANCE POOL CONTROLLER
+========================================================= */
+
+function openPetiModal() {
+    const trip = current();
+    if (!trip) return;
+
+    if (!trip.members || trip.members.length === 0) {
+        toast("Add members before setting up Peti!");
+        return;
+    }
+
+    openModal(
+        "🏦 Trip Peti (Advance Fund)",
+        "Sabhi dost barabar advance pool me jama karein",
+        `
+        <label>Per Person Advance Contribution</label>
+        <input id="petiPerPersonAmount" type="number" min="1" step="10" placeholder="e.g. 2000">
+        
+        <div class="notice" style="margin-top: 14px;">
+            Group ke sabhi <b>${trip.members.length} members</b> ke hisaab se pool me total amount jama ho jayega. Expense add karte waqt "Paid By: Trip Peti" choose karne par paisa seedha yahan se katega!
+        </div>
+
+        <button class="btn btn-primary full" id="savePetiBtn">Deposit in Peti</button>
+        `
+    );
+
+    $("savePetiBtn").onclick = async () => {
+        const amt = Number($("petiPerPersonAmount").value);
+        if (!Number.isFinite(amt) || amt <= 0) {
+            toast("Enter a valid advance amount.");
+            return;
+        }
+
+        const totalContribution = amt * trip.members.length;
+        trip.petiPool = (trip.petiPool || 0) + totalContribution;
+        trip.petiContributions = trip.petiContributions || {};
+
+        trip.members.forEach(m => {
+            trip.petiContributions[m.id] = (trip.petiContributions[m.id] || 0) + amt;
+        });
+
+        saveTripLocally(trip);
+        renderTrip();
+        closeModal();
+        toast(`₹${totalContribution} added to Common Peti! 🏦`);
+
+        if (!navigator.onLine) {
+            addToSyncQueue({
+                type: "updatePeti",
+                tripId: trip.id,
+                petiPool: trip.petiPool,
+                petiContributions: trip.petiContributions
+            });
+            setSyncStatus(false);
+        } else {
+            try {
+                await update(ref(db, `trips/${trip.id}`), {
+                    petiPool: trip.petiPool,
+                    petiContributions: trip.petiContributions
+                });
+                setSyncStatus(true);
+            } catch (err) {
+                console.warn("Peti update queued:", err);
+                addToSyncQueue({
+                    type: "updatePeti",
+                    tripId: trip.id,
+                    petiPool: trip.petiPool,
+                    petiContributions: trip.petiContributions
+                });
+                setSyncStatus(false);
+            }
+        }
+    };
+}
+
+
+/* =========================================================
+   REMOVE MEMBER (CREATOR CONTROL)
+========================================================= */
+
+async function removeMember(memberId) {
+    const trip = current();
+    if (!trip) return;
+
+    const targetMember = trip.members.find(m => m.id === memberId);
+    if (!targetMember) return;
+
+    if (trip.members.length <= 1) {
+        toast("Cannot remove the only member.");
+        return;
+    }
+
+    if (!confirm(`Are you sure you want to remove "${targetMember.name}" from this trip?`)) {
+        return;
+    }
+
+    trip.members = trip.members.filter(m => m.id !== memberId);
+
+    trip.expenses.forEach(exp => {
+        if (Array.isArray(exp.splitBetween)) {
+            exp.splitBetween = exp.splitBetween.filter(id => id !== memberId);
+        }
+        if (exp.customSplits && exp.customSplits[memberId] !== undefined) {
+            delete exp.customSplits[memberId];
+        }
+        if (exp.paidBy === memberId) {
+            exp.paidBy = trip.members[0].id;
+        }
+    });
+
+    saveTripLocally(trip);
+    renderTrip();
+    toast(`${targetMember.name} removed from trip.`);
+
+    if (!navigator.onLine) {
+        addToSyncQueue({
+            type: "removeMember",
+            tripId: trip.id,
+            memberId: memberId
+        });
+        setSyncStatus(false);
+    } else {
+        try {
+            await set(ref(db, `trips/${trip.id}/members/${memberId}`), null);
+            trip.expenses.forEach(exp => {
+                set(ref(db, `trips/${trip.id}/expenses/${exp.id}`), exp);
+            });
+            setSyncStatus(true);
+        } catch (error) {
+            console.warn("Live remove failed, queued for sync:", error);
+            addToSyncQueue({
+                type: "removeMember",
+                tripId: trip.id,
+                memberId: memberId
+            });
+            setSyncStatus(false);
+        }
+    }
+}
+
+
+/* =========================================================
+   DELETE ENTIRE TRIP
+========================================================= */
+
+async function deleteCurrentTrip() {
+    const trip = current();
+    if (!trip) return;
+
+    const promptText = `Are you sure you want to completely delete "${trip.name}"?\nThis cannot be undone!`;
+    if (!confirm(promptText)) return;
+
+    const tripId = trip.id;
+    const tripCode = trip.code;
+
+    unsubscribeTrip();
+    removeRecentTrip(tripId);
+    localStorage.removeItem(tripCacheKey(tripId));
+    delete state.trips[tripId];
+    setCurrent(null);
+
+    show("home");
+    toast("Trip deleted successfully 🗑️");
+
+    if (!navigator.onLine) {
+        addToSyncQueue({
+            type: "deleteTrip",
+            tripId: tripId,
+            code: tripCode
+        });
+        setSyncStatus(false);
+    } else {
+        try {
+            await update(ref(db), {
+                [`trips/${tripId}`]: null,
+                [`tripCodes/${tripCode}`]: null
+            });
+            setSyncStatus(true);
+        } catch (error) {
+            console.warn("Cloud delete queued:", error);
+            addToSyncQueue({
+                type: "deleteTrip",
+                tripId: tripId,
+                code: tripCode
+            });
+            setSyncStatus(false);
+        }
+    }
+}
+
+
+/* =========================================================
+   EXPENSE FORM (PETI AUTO-DEDUCT SUPPORT)
 ========================================================= */
 
 function expenseForm(exp = null) {
@@ -887,7 +1152,7 @@ function expenseForm(exp = null) {
     if (!trip) return;
 
     const isEdit = !!exp;
-    const paidBy = exp?.paidBy || trip.members[0]?.id || "";
+    const paidBy = exp?.paidBy || (trip.petiPool > 0 ? "PETI_POOL" : trip.members[0]?.id || "");
     let splitMode = exp?.splitMode || "equal";
     let selectedCategory = exp?.category || "food";
 
@@ -923,6 +1188,9 @@ function expenseForm(exp = null) {
 
         <label>Paid By</label>
         <select id="expensePaidBy">
+            <option value="PETI_POOL" ${paidBy === "PETI_POOL" ? "selected" : ""}>
+                🏦 Trip Peti (Balance: ${money(trip.petiPool || 0)})
+            </option>
             ${trip.members.map(member => `
                 <option value="${esc(member.id)}" ${member.id === paidBy ? "selected" : ""}>
                     ${esc(member.name)}
@@ -1066,6 +1334,22 @@ function expenseForm(exp = null) {
             return;
         }
 
+        // Peti pool auto-deduct check
+        if (paidBy === "PETI_POOL") {
+            const previousAmt = (isEdit && exp?.paidBy === "PETI_POOL") ? exp.amount : 0;
+            const availablePeti = (trip.petiPool || 0) + previousAmt;
+
+            if (amount > availablePeti) {
+                toast(`Peti me sirf ${money(availablePeti)} bache hain! Extra personal split karein.`);
+                return;
+            }
+            // Auto-deduct from pool
+            trip.petiPool = availablePeti - amount;
+        } else if (isEdit && exp?.paidBy === "PETI_POOL") {
+            // Restore pool if paidBy changed from Peti to a member
+            trip.petiPool = (trip.petiPool || 0) + exp.amount;
+        }
+
         let customSplits = {};
         if (splitMode === "custom") {
             let total = 0;
@@ -1117,11 +1401,24 @@ function expenseForm(exp = null) {
                 tripId: trip.id,
                 expense: expense
             });
+            if (paidBy === "PETI_POOL" || (isEdit && exp?.paidBy === "PETI_POOL")) {
+                addToSyncQueue({
+                    type: "updatePeti",
+                    tripId: trip.id,
+                    petiPool: trip.petiPool,
+                    petiContributions: trip.petiContributions
+                });
+            }
             setSyncStatus(false);
             toast("Saved offline. Will sync when online 📱");
         } else {
             try {
                 await set(ref(db, `trips/${trip.id}/expenses/${expenseId}`), expense);
+                if (paidBy === "PETI_POOL" || (isEdit && exp?.paidBy === "PETI_POOL")) {
+                    await update(ref(db, `trips/${trip.id}`), {
+                        petiPool: trip.petiPool
+                    });
+                }
                 setSyncStatus(true);
             } catch (error) {
                 console.warn("Live save failed, saved to sync queue:", error);
@@ -1145,6 +1442,11 @@ async function deleteExpense(id) {
 
     if (!confirm(`Delete "${expense.name}"?`)) return;
 
+    // Restore to Peti if deleted expense was paid via Peti
+    if (expense.paidBy === "PETI_POOL") {
+        trip.petiPool = (trip.petiPool || 0) + expense.amount;
+    }
+
     trip.expenses = trip.expenses.filter(e => e.id !== id);
     saveTripLocally(trip);
     renderTrip();
@@ -1156,10 +1458,23 @@ async function deleteExpense(id) {
             tripId: trip.id,
             expenseId: id
         });
+        if (expense.paidBy === "PETI_POOL") {
+            addToSyncQueue({
+                type: "updatePeti",
+                tripId: trip.id,
+                petiPool: trip.petiPool,
+                petiContributions: trip.petiContributions
+            });
+        }
         setSyncStatus(false);
     } else {
         try {
             await set(ref(db, `trips/${trip.id}/expenses/${id}`), null);
+            if (expense.paidBy === "PETI_POOL") {
+                await update(ref(db, `trips/${trip.id}`), {
+                    petiPool: trip.petiPool
+                });
+            }
             setSyncStatus(true);
         } catch (error) {
             console.warn("Live delete failed, queued for sync:", error);
@@ -1175,11 +1490,12 @@ async function deleteExpense(id) {
 
 
 /* =========================================================
-   SPLIT CALCULATIONS & BALANCES
+   SPLIT CALCULATIONS & BALANCES (FAIR RETROACTIVE ENGINE)
 ========================================================= */
 
-function shares(exp) {
+function shares(exp, allTripMembers = []) {
     const result = {};
+
     if (exp.splitMode === "custom") {
         for (const memberId of exp.splitBetween || []) {
             result[memberId] = Number(exp.customSplits?.[memberId] || 0);
@@ -1187,7 +1503,11 @@ function shares(exp) {
         return result;
     }
 
-    const ids = exp.splitBetween || [];
+    let ids = exp.splitBetween || [];
+    if (allTripMembers.length > 0) {
+        ids = allTripMembers.map(m => m.id);
+    }
+
     const each = ids.length ? Number(exp.amount) / ids.length : 0;
     ids.forEach(id => {
         result[id] = each;
@@ -1205,12 +1525,17 @@ function balances() {
     });
 
     trip.expenses.forEach(exp => {
+        // If expense was paid from Common Peti, no personal debt is created!
+        if (exp.paidBy === "PETI_POOL") {
+            return;
+        }
+
         const amt = Number(exp.amount || 0);
         if (result[exp.paidBy] !== undefined) {
             result[exp.paidBy] += amt;
         }
 
-        const split = shares(exp);
+        const split = shares(exp, trip.members);
         Object.entries(split).forEach(([memberId, share]) => {
             if (result[memberId] !== undefined) {
                 result[memberId] -= Number(share || 0);
@@ -1257,6 +1582,7 @@ function settlements() {
 }
 
 function memberName(id) {
+    if (id === "PETI_POOL") return "Common Peti 🏦";
     const trip = current();
     const member = trip?.members.find(m => m.id === id);
     return member?.name || "Unknown";
@@ -1273,6 +1599,8 @@ function empty(title, text) {
 
 function expenseHTML(exp) {
     const visual = expenseVisual(exp.name, exp.category);
+    const isPeti = exp.paidBy === "PETI_POOL";
+
     return `
         <div class="expense-main-row">
             <div class="expense-image ${visual.type}">
@@ -1281,7 +1609,7 @@ function expenseHTML(exp) {
             <div class="expense-info">
                 <b>${esc(exp.name)}</b>
                 <div class="expense-meta">
-                    <small>Paid by ${esc(memberName(exp.paidBy))}</small>
+                    <small style="${isPeti ? 'color: var(--green); font-weight: 750;' : ''}">Paid by ${esc(memberName(exp.paidBy))}</small>
                     <span class="dot">•</span>
                     <small>${formatDate(exp.createdAt)}</small>
                 </div>
@@ -1293,7 +1621,7 @@ function expenseHTML(exp) {
 
 
 /* =========================================================
-   UI RENDERING (EXPENSES, MEMBERS, BALANCES)
+   UI RENDERING (EXPENSES, MEMBERS, BALANCES, PETI)
 ========================================================= */
 
 function renderRecentExpenses() {
@@ -1327,15 +1655,25 @@ function renderMembers() {
         return;
     }
 
-    container.innerHTML = trip.members.map((member, index) => `
-        <div class="card member-card">
-            <div class="avatar">${esc(member.name.charAt(0).toUpperCase())}</div>
-            <div>
-                <b>${esc(member.name)}</b>
-                <small>${index === 0 ? "Trip creator" : "Member"}</small>
+    const creatorId = trip.creatorId || trip.members[0]?.id;
+
+    container.innerHTML = trip.members.map((member) => {
+        const isCreator = member.id === creatorId;
+        return `
+            <div class="card member-card">
+                <div class="avatar">${esc(member.name.charAt(0).toUpperCase())}</div>
+                <div class="member-info">
+                    <b>${esc(member.name)}</b>
+                    <small>${isCreator ? "Trip Creator (Admin)" : "Member"}</small>
+                </div>
+                ${!isCreator ? `
+                    <button type="button" class="member-remove-btn" data-remove-member="${esc(member.id)}" title="Remove ${esc(member.name)}">
+                        ✕
+                    </button>
+                ` : ""}
             </div>
-        </div>
-    `).join("");
+        `;
+    }).join("");
 }
 
 function renderExpenses() {
@@ -1424,6 +1762,27 @@ function renderSettlement() {
     initDebtGraph();
 }
 
+function renderPetiUI() {
+    const trip = current();
+    if (!trip) return;
+
+    const pool = Number(trip.petiPool || 0);
+    const displayEl = $("petiBalanceDisplay");
+    const metaEl = $("petiMetaText");
+    const cardEl = $("petiCard");
+
+    if (displayEl) displayEl.textContent = money(pool);
+    if (cardEl) {
+        cardEl.classList.toggle("low-balance", pool <= 500 && pool > 0);
+    }
+    if (metaEl) {
+        const contributorsCount = Object.keys(trip.petiContributions || {}).length;
+        metaEl.textContent = contributorsCount > 0
+            ? `${contributorsCount} members pooled advance`
+            : "No advance added yet";
+    }
+}
+
 function renderTrip() {
     const trip = current();
     if (!trip) {
@@ -1439,6 +1798,12 @@ function renderTrip() {
     const total = trip.expenses.reduce((sum, exp) => sum + Number(exp.amount || 0), 0);
     $("totalExpense").textContent = money(total);
 
+    const deleteBtn = $("deleteTripBtn");
+    if (deleteBtn) {
+        deleteBtn.classList.remove("hidden");
+    }
+
+    renderPetiUI();
     renderRecentExpenses();
     renderMembers();
     renderExpenses();
@@ -1634,7 +1999,6 @@ function renderGraphLoop(ctx, width, height) {
         }
     });
 
-    // 1. Connecting debt lines & arrows
     debts.forEach(debt => {
         const fromNode = graphNodes.find(n => n.id === debt.from);
         const toNode = graphNodes.find(n => n.id === debt.to);
@@ -1690,7 +2054,6 @@ function renderGraphLoop(ctx, width, height) {
         ctx.restore();
     });
 
-    // 2. Animated Flow Particles
     graphParticles.forEach(p => {
         p.progress += p.speed;
         if (p.progress > 1) p.progress = 0;
@@ -1714,7 +2077,6 @@ function renderGraphLoop(ctx, width, height) {
         ctx.shadowBlur = 0;
     });
 
-    // 3. Member Bubbles
     graphNodes.forEach(node => {
         const isSelected = selectedNode && selectedNode.id === node.id;
         const isDimmed = selectedNode && !isSelected;
@@ -1963,6 +2325,10 @@ async function shareWhatsAppSummary() {
     text += `💰 Total Expenses: ${money(total)}\n`;
     text += `👥 Members: ${trip.members.map(m => m.name).join(", ")}\n\n`;
 
+    if (trip.petiPool > 0) {
+        text += `🏦 *Common Peti Balance:* ${money(trip.petiPool)}\n\n`;
+    }
+
     text += `⚖️ *Final Settlements:*\n`;
     if (!list.length) {
         text += `All settled up! Nobody owes anything 🎉\n\n`;
@@ -2047,6 +2413,9 @@ $("modal")?.addEventListener("click", e => {
 $("copyCodeBtn")?.addEventListener("click", copyCode);
 $("shareBtn")?.addEventListener("click", shareTrip);
 $("whatsappShareBtn")?.addEventListener("click", shareWhatsAppSummary);
+$("deleteTripBtn")?.addEventListener("click", deleteCurrentTrip);
+
+$("addPetiMoneyBtn")?.addEventListener("click", openPetiModal);
 
 $("addMemberBtn")?.addEventListener("click", addMember);
 $("overviewAddMember")?.addEventListener("click", addMember);
@@ -2056,7 +2425,7 @@ $("overviewAddExpense")?.addEventListener("click", () => expenseForm());
 
 $("spinWheelBtn")?.addEventListener("click", openRouletteModal);
 
-// Settlement View Toggle Listeners (Visual Graph vs List)
+// Settlement View Toggle Listeners
 $("toggleGraphViewBtn")?.addEventListener("click", () => {
     state.settleView = "graph";
     $("toggleGraphViewBtn").classList.add("active");
@@ -2146,8 +2515,14 @@ document.querySelectorAll("[data-tab]").forEach(button => {
     });
 });
 
-// Inline expense actions
+// Inline expense and member removal actions
 document.addEventListener("click", event => {
+    const removeMemBtn = event.target.closest("[data-remove-member]");
+    if (removeMemBtn) {
+        removeMember(removeMemBtn.dataset.removeMember);
+        return;
+    }
+
     const editBtn = event.target.closest("[data-edit-expense]");
     if (editBtn) {
         const trip = current();
@@ -2209,10 +2584,8 @@ window.addEventListener("pagehide", () => {
             const portal = $("portalScreen");
             if (!portal) return;
 
-            // 1. Iris camera blades unlock & rotate open
             portal.classList.add("open-iris");
 
-            // 2. Smoothly fade out portal layer after reveal
             setTimeout(() => {
                 portal.classList.add("dismiss");
             }, 850);
